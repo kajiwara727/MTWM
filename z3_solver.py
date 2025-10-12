@@ -50,12 +50,13 @@ class Z3Solver:
         if last_best_waste is not None:
             self.opt.add(self.total_waste_var < last_best_waste)
 
-        print("\n--- 4. Solving the optimization problem (press Ctrl+C to interrupt and save) ---")
+        print("\n--- Solving the optimization problem (press Ctrl+C to interrupt and save) ---")
         best_model = None
         min_waste_val = last_best_waste
         start_time = time.time()
         
-        # z3.set_param('verbose', 1)
+        # Z3の詳細ログを有効化
+        z3.set_param('verbose', 1)
         try:
             while self.check() == z3.sat:
                 current_model = self.get_model()
@@ -77,8 +78,8 @@ class Z3Solver:
         except KeyboardInterrupt:
             print("\nOptimization interrupted by user. Reporting the best solution found so far.")
         finally:
-            # z3.set_param('verbose', 0)
-            pass
+            # 処理終了後（中断時も含む）に詳細ログを無効化
+            z3.set_param('verbose', 0)
 
         elapsed_time = time.time() - start_time
         print("--- Z3 Solver Finished ---")
@@ -132,8 +133,9 @@ class Z3Solver:
                     rhs_terms.append(r_src * w_var * (p_dst // p_src))
                     
                 for key, w_var in node.get('inter_sharing_vars', {}).items():
-                    m_src = int(key.split("_l")[0].replace("from_m", ""))
-                    l_src, k_src = map(int, key.split("_l")[1].split("k"))
+                    m_src_str, lk_src_str = key.replace("from_m", "").split("_l")
+                    m_src = int(m_src_str)
+                    l_src, k_src = map(int, lk_src_str.split("k"))
                     r_src = self.problem.forest[m_src][l_src][k_src]['ratio_vars'][t]
                     p_src = self.problem.p_values[m_src][l_src]
                     rhs_terms.append(r_src * w_var * (p_dst // p_src))
@@ -141,6 +143,15 @@ class Z3Solver:
                 self.opt.add(lhs == z3.Sum(rhs_terms))
 
     def _set_ratio_sum_constraints(self):
+        # ルートノードでの制約を追加
+        for m, target in enumerate(self.problem.targets_config):
+            p_root = self.problem.p_values[m][0]
+            if sum(target['ratios']) != p_root:
+                raise ValueError(f"Target '{target['name']}' ratios sum ({sum(target['ratios'])}) "
+                                 f"does not match the root p-value ({p_root}). "
+                                 f"The sum of ratios must equal the product of all factors.")
+        
+        # 全ノードでの制約
         for m, l, k, node in _iterate_all_nodes(self.problem):
             self.opt.add(z3.Sum(node['ratio_vars']) == self.problem.p_values[m][l])
 
@@ -162,12 +173,18 @@ class Z3Solver:
     def _set_range_constraints(self):
         for m, l, k, node in _iterate_all_nodes(self.problem):
             upper_bound = self.problem.targets_config[m]['factors'][l] - 1
-            for var in _get_node_inputs(node):
-                self.opt.add(var >= 0)
+            # reagent_vars
+            for var in node.get('reagent_vars', []):
+                self.opt.add(var >= 0, var <= upper_bound)
+            # sharing_vars
+            sharing_vars = (list(node.get('intra_sharing_vars', {}).values()) +
+                            list(node.get('inter_sharing_vars', {}).values()))
+            for var in sharing_vars:
                 effective_upper = upper_bound
-                if "w_" in str(var) and MAX_SHARING_VOLUME is not None:
+                if MAX_SHARING_VOLUME is not None:
                     effective_upper = min(upper_bound, MAX_SHARING_VOLUME)
-                self.opt.add(var <= effective_upper)
+                self.opt.add(var >= 0, var <= effective_upper)
+
 
     def _set_symmetry_breaking_constraints(self):
         for m, tree in enumerate(self.problem.forest):
