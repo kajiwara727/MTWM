@@ -22,13 +22,30 @@ class SolutionReporter:
         return output_dir
 
     def report_from_checkpoint(self, analysis, waste):
-        """チェックポイントから読み込んだ結果をレポートする"""
+        """チェックポイントから読み込んだ結果をレポートし、可視化を試みる"""
+        # --- ここからが修正部分 ---
+        # 循環インポートを避けるため、関数内でz3_solverをインポートする
+        from z3_solver import Z3Solver
+        # --- ここまでが修正部分 ---
+
         self._print_console_summary(analysis, waste, 0)
         output_dir = self._save_summary_to_file(analysis, waste, 0)
         if output_dir:
-            print("\nVisualization was not generated because the solution is from a previous run.")
-            print(f"   Summary files saved in: {output_dir}")
-
+            print("\nAttempting to generate visualization from checkpoint data...")
+            # チェックポイントの解を可視化するため、ソルバーを一時的に利用してモデルを復元
+            temp_solver = Z3Solver(self.problem)
+            temp_solver.solver.add(temp_solver.total_waste_var == waste)
+            
+            if temp_solver.check() == z3.sat:
+                # モデルの復元に成功した場合
+                checkpoint_model = temp_solver.get_model()
+                visualizer = SolutionVisualizer(self.problem, checkpoint_model)
+                visualizer.visualize_solution(output_dir)
+                print(f"   Visualization successfully generated from checkpoint.")
+            else:
+                # モデルの復元に失敗した場合
+                print("\nVisualization could not be generated because the model could not be recreated.")
+                
     def analyze_solution(self):
         """ソルバーのモデルを解析し、構造化されたデータとして抽出する"""
         if not self.model: return None

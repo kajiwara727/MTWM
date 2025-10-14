@@ -1,4 +1,4 @@
-# z3_solver.py
+# z3_solver.py (修正版)
 import z3
 import time
 from reporting import SolutionReporter
@@ -39,7 +39,6 @@ def _get_outgoing_vars(problem, m_src, l_src, k_src):
 class Z3Solver:
     def __init__(self, problem):
         self.problem = problem
-        # z3.Optimize() から z3.Solver() に変更
         self.solver = z3.Solver()
         z3.set_param('memory_max_size', 8192)
 
@@ -74,7 +73,6 @@ class Z3Solver:
                 if min_waste_val == 0:
                     print("Found optimal solution with zero waste.")
                     break
-                # 次の解を見つけるために制約を追加
                 self.solver.add(self.total_waste_var < min_waste_val)
 
         except KeyboardInterrupt:
@@ -82,7 +80,6 @@ class Z3Solver:
 
         elapsed_time = time.time() - start_time
         print("--- Z3 Solver Finished ---")
-        # last_analysisが一度も更新されなかった場合を考慮
         final_analysis = analysis if 'analysis' in locals() else last_analysis
         return best_model, min_waste_val, final_analysis, elapsed_time
 
@@ -96,7 +93,6 @@ class Z3Solver:
     # --- 制約設定メソッド ---
 
     def _set_all_constraints(self):
-        """モデルに必要なすべての制約を追加する"""
         self._set_initial_constraints()
         self._set_conservation_constraints()
         self._set_concentration_constraints()
@@ -109,9 +105,11 @@ class Z3Solver:
 
     def _set_initial_constraints(self):
         for m, target in enumerate(self.problem.targets_config):
-            root = self.problem.forest[m][0][0]
-            for t in range(self.problem.num_reagents):
-                self.solver.add(root['ratio_vars'][t] == target['ratios'][t])
+            # ルートノードは常に (0,0) と仮定
+            if len(self.problem.forest[m].get(0, [])) > 0:
+                root = self.problem.forest[m][0][0]
+                for t in range(self.problem.num_reagents):
+                    self.solver.add(root['ratio_vars'][t] == target['ratios'][t])
 
     def _set_conservation_constraints(self):
         for m_src, l_src, k_src, node in _iterate_all_nodes(self.problem):
@@ -122,7 +120,8 @@ class Z3Solver:
     def _set_concentration_constraints(self):
         for m_dst, l_dst, k_dst, node in _iterate_all_nodes(self.problem):
             f_dst = self.problem.targets_config[m_dst]['factors'][l_dst]
-            p_dst = self.problem.p_values[m_dst][l_dst]
+            p_dst = self.problem.p_values[m_dst][(l_dst, k_dst)]
+            
             for t in range(self.problem.num_reagents):
                 lhs = f_dst * node['ratio_vars'][t]
                 rhs_terms = [p_dst * node['reagent_vars'][t]]
@@ -130,7 +129,7 @@ class Z3Solver:
                 for key, w_var in node.get('intra_sharing_vars', {}).items():
                     l_src, k_src = map(int, key.replace("from_l", "").split("k"))
                     r_src = self.problem.forest[m_dst][l_src][k_src]['ratio_vars'][t]
-                    p_src = self.problem.p_values[m_dst][l_src]
+                    p_src = self.problem.p_values[m_dst][(l_src, k_src)]
                     rhs_terms.append(r_src * w_var * (p_dst // p_src))
                     
                 for key, w_var in node.get('inter_sharing_vars', {}).items():
@@ -138,27 +137,28 @@ class Z3Solver:
                     m_src = int(m_src_str)
                     l_src, k_src = map(int, lk_src_str.split("k"))
                     r_src = self.problem.forest[m_src][l_src][k_src]['ratio_vars'][t]
-                    p_src = self.problem.p_values[m_src][l_src]
+                    p_src = self.problem.p_values[m_src][(l_src, k_src)]
                     rhs_terms.append(r_src * w_var * (p_dst // p_src))
                     
                 self.solver.add(lhs == z3.Sum(rhs_terms))
 
     def _set_ratio_sum_constraints(self):
-        # ルートノードでの制約を追加
         for m, target in enumerate(self.problem.targets_config):
-            p_root = self.problem.p_values[m][0]
-            if sum(target['ratios']) != p_root:
-                raise ValueError(f"Target '{target['name']}' ratios sum ({sum(target['ratios'])}) "
-                                 f"does not match the root p-value ({p_root}). "
-                                 f"The sum of ratios must equal the product of all factors.")
-        
-        # 全ノードでの制約
+             if len(self.problem.forest[m].get(0, [])) > 0:
+                p_root = self.problem.p_values[m][(0, 0)]
+                if sum(target['ratios']) != p_root:
+                    raise ValueError(f"Target '{target['name']}' ratios sum ({sum(target['ratios'])}) "
+                                     f"does not match the root p-value ({p_root}). "
+                                     f"The sum of ratios must equal the product of all factors based on the generated tree.")
+
         for m, l, k, node in _iterate_all_nodes(self.problem):
-            self.solver.add(z3.Sum(node['ratio_vars']) == self.problem.p_values[m][l])
+            p_node = self.problem.p_values[m][(l, k)]
+            self.solver.add(z3.Sum(node['ratio_vars']) == p_node)
 
     def _set_leaf_node_constraints(self):
         for m, l, k, node in _iterate_all_nodes(self.problem):
-            if self.problem.p_values[m][l] == self.problem.targets_config[m]['factors'][l]:
+            # is_leafメソッドで末端ノードを判定
+            if self.problem.is_leaf(m, l, k):
                 for t in range(self.problem.num_reagents):
                     self.solver.add(node['ratio_vars'][t] == node['reagent_vars'][t])
 
@@ -169,18 +169,15 @@ class Z3Solver:
             if l == 0:
                 self.solver.add(total_sum == f_value)
             else:
-                # total_sum > 0 ならば、total_sum == f_value となる
                 self.solver.add(z3.Implies(total_sum > 0, total_sum == f_value))
-                # total_sum は 0 または f_value のどちらか
                 self.solver.add(z3.Or(total_sum == 0, total_sum == f_value))
 
     def _set_range_constraints(self):
         for m, l, k, node in _iterate_all_nodes(self.problem):
             upper_bound = self.problem.targets_config[m]['factors'][l] - 1
-            # reagent_vars
             for var in node.get('reagent_vars', []):
                 self.solver.add(var >= 0, var <= upper_bound)
-            # sharing_vars
+            
             sharing_vars = (list(node.get('intra_sharing_vars', {}).values()) +
                             list(node.get('inter_sharing_vars', {}).values()))
             for var in sharing_vars:
@@ -203,12 +200,9 @@ class Z3Solver:
             if l_src == 0: continue
             total_prod = z3.Sum(_get_node_inputs(node))
             total_used = z3.Sum(_get_outgoing_vars(self.problem, m_src, l_src, k_src))
-            
-            # total_prod > 0 ならば total_used > 0
             self.solver.add(z3.Implies(total_prod > 0, total_used > 0))
 
     def _set_objective_function(self):
-        """目的関数：総廃棄量の最小化"""
         all_waste_vars = []
         for m_src, l_src, k_src, node in _iterate_all_nodes(self.problem):
             if l_src == 0: continue
@@ -224,5 +218,4 @@ class Z3Solver:
             
         total_waste = z3.Int("total_waste")
         self.solver.add(total_waste == z3.Sum(all_waste_vars))
-        # self.solver.minimize(total_waste) は Solver にはないため削除
         return total_waste

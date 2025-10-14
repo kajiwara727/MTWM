@@ -1,10 +1,11 @@
-# main.py
+# main.py (修正版)
 import z3
 from config import get_targets_config
 from mtwm_model import MTWMProblem
 from z3_solver import Z3Solver
 from reporting import SolutionReporter
 from checkpoint_handler import CheckpointHandler
+from p_checker import PValueChecker # <-- 新しくインポート
 
 def main():
     """
@@ -17,25 +18,30 @@ def main():
         print(f"  - {target['name']}: Ratios = {target['ratios']}")
     print("-" * 35 + "\n")
 
-    # 2. 各コンポーネント（問題定義、ソルバー、チェックポイントハンドラ）を初期化
+    # 2. MTWM問題の構造を定義
     problem = MTWMProblem(targets_config)
+
+    # --- ここからが追加部分 ---
+    # Pの値を確認するためのチェッカーを初期化し、結果を表示
+    p_checker = PValueChecker(problem)
+    p_checker.display_p_values()
+    # --- ここまでが追加部分 ---
+
+    # 3. 各コンポーネント（ソルバー、チェックポイントハンドラ）を初期化
     solver = Z3Solver(problem)
     checkpoint_handler = CheckpointHandler(targets_config)
 
-    # 3. Z3ソルバーで最適化を実行し、最良解を見つける
+    # 4. Z3ソルバーで最適化を実行し、最良解を見つける
     best_model, final_waste, last_analysis, elapsed_time = solver.solve(checkpoint_handler)
 
-    # 4. 最適化結果をレポートとして出力
+    # 5. 最適化結果をレポートとして出力
     reporter = SolutionReporter(problem, best_model)
     if best_model:
-        # 新しい解が見つかった場合
         reporter.generate_full_report(final_waste, elapsed_time)
     elif last_analysis:
-        # 新しい解は見つからず、チェックポイントの解が最良の場合
         print("\n--- No new solution found. Reporting from the last checkpoint ---")
         reporter.report_from_checkpoint(last_analysis, final_waste)
     else:
-        # 解が見つからなかった場合
         print("\n--- No solution found ---")
         if solver.last_check_result == z3.unknown:
             print(f"Solver timed out or was interrupted ({elapsed_time:.2f} sec)")
