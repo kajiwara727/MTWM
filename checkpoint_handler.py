@@ -1,38 +1,34 @@
-# checkpoint_handler.py (修正版)
+# checkpoint_handler.py
 import pickle
 import os
-import json
-import hashlib
+from utils import generate_config_hash
 
 class CheckpointHandler:
     """
     計算の途中結果（チェックポイント）の保存と読み込みを管理するクラス。
     """
-    # --- ここからが修正部分 ---
-    def __init__(self, targets_config, mode="waste"):
+    # --- ▼▼▼ ここからが修正点です ▼▼▼ ---
+    def __init__(self, targets_config, mode, run_name, config_hash):
         """
         コンストラクタ
         Args:
             targets_config (list): 目標混合液の設定データ。
-            mode (str): 最適化モード ('waste' or 'operations')
+            mode (str): 最適化モード ('waste' or 'operations')。
+            run_name (str): config.pyで設定された実行名。
+            config_hash (str): utilsで計算された設定ハッシュ。
         """
         self.targets_config = targets_config
         self.mode = mode
+        self.run_name = run_name
+        self.config_hash = config_hash
         self.checkpoint_file = self._get_checkpoint_filename()
-    # --- ここまでが修正部分 ---
-
+    
     def _get_checkpoint_filename(self):
         """
-        設定データとモードを元にハッシュを計算し、一意のファイル名を生成する。
+        設定ハッシュに基づき、一意のファイル名を生成する。
         """
-        # --- ここからが修正部分 ---
-        # ハッシュの元データにモードを追加
-        config_str = json.dumps(self.targets_config, sort_keys=True) + self.mode
-        # --- ここまでが修正部分 ---
-        hasher = hashlib.md5()
-        hasher.update(config_str.encode('utf-8'))
-        config_hash = hasher.hexdigest()
-        return f"checkpoint_{config_hash}.pkl"
+        return f"checkpoint_{self.config_hash}.pkl"
+    # --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
 
     def save_checkpoint(self, analysis_results, best_value, elapsed_time):
         """
@@ -41,8 +37,9 @@ class CheckpointHandler:
         print(f"Checkpoint saved to {self.checkpoint_file}. Current best {self.mode}: {best_value}")
         
         data_to_save = {
+            'run_name': self.run_name, # 実行名も保存
             'targets_config': self.targets_config,
-            'mode': self.mode, # モードも保存
+            'mode': self.mode,
             'analysis_results': analysis_results,
             'best_value': best_value,
             'elapsed_time': elapsed_time
@@ -63,9 +60,10 @@ class CheckpointHandler:
             with open(self.checkpoint_file, 'rb') as f:
                 data = pickle.load(f)
                 
-            # 設定とモードが一致するか確認
-            if data['targets_config'] != self.targets_config or data.get('mode') != self.mode:
-                print("Warning: Checkpoint file is for a different configuration/mode. Starting fresh.")
+            # 保存された設定と現在の設定が一致するかを厳密にチェック
+            current_hash_check = generate_config_hash(self.targets_config, self.mode, self.run_name)
+            if self.config_hash != current_hash_check:
+                print("Warning: Checkpoint file is for a different configuration. Starting fresh.")
                 return None, None
                 
             print(f"Checkpoint loaded from {self.checkpoint_file}. Resuming with best {self.mode} < {data['best_value']}")

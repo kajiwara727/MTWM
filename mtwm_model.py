@@ -9,88 +9,27 @@ class MTWMProblem:
     MTWM (Multi-Target Waste Minimization) 問題の構造を定義、管理するクラス。
     変数の定義と、それらの関係性をカプセル化する。
     """
-    def __init__(self, targets_config):
+    def __init__(self, targets_config, tree_structures, p_values):
+        """
+        コンストラクタ。事前計算されたツリー構造とP値を受け取る。
+        """
         self.targets_config = targets_config
         self.num_reagents = len(targets_config[0]['ratios']) if targets_config else 0
-        self.tree_structures = self._build_full_tree_structures()
-        self.p_values = self._calculate_p_values_per_node()
+        # 外部で生成された正確な構造とP値を使用
+        self.tree_structures = tree_structures
+        self.p_values = p_values
+        
         self.forest = self._define_base_variables()
         self.potential_sources_map = self._precompute_potential_sources()
         self._define_sharing_variables()
 
-    def _build_full_tree_structures(self):
-        """DFMMに基づき、親子関係を含む詳細なツリー構造のフォレストを構築する。"""
-        forest_structure = []
-        for target in self.targets_config:
-            ratios = target['ratios']
-            factors = target['factors']
-            num_levels = len(factors)
-            
-            tree_nodes = {}
-            values_to_process = list(ratios)
-            nodes_from_below_ids = []
-
-            for l in range(num_levels - 1, -1, -1):
-                factor = factors[l]
-                level_remainders = [v % factor for v in values_to_process]
-                level_quotients = [v // factor for v in values_to_process]
-                
-                total_reagent_inputs = sum(level_remainders)
-                num_nodes_from_below = len(nodes_from_below_ids)
-                total_inputs = total_reagent_inputs + num_nodes_from_below
-                num_nodes_at_this_level = math.ceil(total_inputs / factor) if total_inputs > 0 else 0
-
-                current_level_node_ids = [(l, k) for k in range(num_nodes_at_this_level)]
-                tree_nodes.update({node_id: {'children': []} for node_id in current_level_node_ids})
-                
-                # 子ノードを親ノードに割り当てる (シンプルなロジック)
-                if num_nodes_at_this_level > 0:
-                    parent_idx = 0
-                    for child_id in nodes_from_below_ids:
-                        tree_nodes[current_level_node_ids[parent_idx]]['children'].append(child_id)
-                        parent_idx = (parent_idx + 1) % num_nodes_at_this_level
-                
-                nodes_from_below_ids = current_level_node_ids
-                values_to_process = level_quotients
-            
-            forest_structure.append(tree_nodes)
-        return forest_structure
-
-    def _calculate_p_values_per_node(self):
-        """構築されたツリー構造に基づき、ノードごとにPの値を再帰的に計算する。"""
-        p_forest = []
-        for m, tree_structure in enumerate(self.tree_structures):
-            factors = self.targets_config[m]['factors']
-            memo = {}
-            p_tree = {}
-
-            def get_p_for_node(node_id):
-                if node_id in memo:
-                    return memo[node_id]
-
-                level, k = node_id
-                children = tree_structure.get(node_id, {}).get('children', [])
-
-                if not children:
-                    p = factors[level]
-                else:
-                    max_child_p = max(get_p_for_node(child_id) for child_id in children) if children else 1
-                    p = max_child_p * factors[level]
-                
-                memo[node_id] = p
-                return p
-
-            for node_id in tree_structure:
-                p_tree[node_id] = get_p_for_node(node_id)
-            
-            p_forest.append(p_tree)
-        return p_forest
-
     def _define_base_variables(self):
         """混合ノード、濃度、試薬に関する基本変数を定義する。"""
         forest = []
+        # self.tree_structures を直接使用する
         for m, tree_structure in enumerate(self.tree_structures):
             tree_data = {}
+            # (以降のこのメソッドのコードは変更なし)
             levels = sorted({l for l, k in tree_structure.keys()})
             for l in levels:
                 nodes_at_level = sorted([k for l_node, k in tree_structure.keys() if l_node == l])

@@ -6,25 +6,15 @@ class PreRunAnalyzer:
     最適化実行前の事前チェック（P値検証、共有可能性）を行い、
     結果を単一のレポートファイルに保存するクラス。
     """
-    def __init__(self, problem):
-        """
-        コンストラクタ
-
-        Args:
-            problem (MTWMProblem): 解析対象のMTWMProblemインスタンス。
-        """
+    def __init__(self, problem, tree_structures):
         self.problem = problem
+        self.tree_structures = tree_structures # ツリー構造を保持
 
     def generate_report(self, output_dir):
-        """
-        P値の検証と共有可能性の事前チェック結果を結合したレポートを生成・保存する。
-
-        Args:
-            output_dir (str): レポートを保存するディレクトリのパス。
-        """
         filepath = os.path.join(output_dir, "_pre_run_analysis.txt")
-        
         content = []
+        content.extend(self._build_tree_structure_section()) # 新しいセクションを追加
+        content.append("\n\n" + "="*55 + "\n")
         content.extend(self._build_p_values_section())
         content.append("\n\n" + "="*55 + "\n")
         content.extend(self._build_sharing_potential_section())
@@ -35,6 +25,23 @@ class PreRunAnalyzer:
             print(f"Pre-run analysis report saved to: {filepath}")
         except IOError as e:
             print(f"Error saving pre-run analysis report: {e}")
+
+    def _build_tree_structure_section(self):
+        """DFMMによって構築されたツリーの接続情報レポートセクションを構築する。"""
+        content = ["--- Section 1: Generated Tree Structures (Node Connections) ---"]
+        for m, tree in enumerate(self.tree_structures):
+            target_info = self.problem.targets_config[m]
+            content.append(f"\n[Target: {target_info['name']}] (Factors: {target_info['factors']})")
+            if not tree:
+                content.append("  No nodes generated for this target.")
+                continue
+            
+            sorted_nodes = sorted(tree.items())
+            for node_id, node_data in sorted_nodes:
+                level, k = node_id
+                children_str = ", ".join([f"v_{c[0]}_{c[1]}" for c in sorted(node_data['children'])])
+                content.append(f"  Node v_m{m}_l{level}_k{k} <-- [{children_str if children_str else 'Reagents Only'}]")
+        return content
 
     def _build_p_values_section(self):
         """P値の検証レポートセクションを構築する。"""
