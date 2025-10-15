@@ -1,70 +1,64 @@
-# reporting.py
+# reporting.py (修正版)
 import os
 import z3
-from config import MAX_SHARING_VOLUME, MAX_LEVEL_DIFF
+from config import MAX_SHARING_VOLUME, MAX_LEVEL_DIFF, MAX_MIXER_SIZE
 from visualization import SolutionVisualizer
 
 class SolutionReporter:
     """Z3ソルバーの結果を解析し、テキストベースのレポートを生成するクラス"""
 
-    def __init__(self, problem, model):
+    def __init__(self, problem, model, objective_mode="waste"):
         self.problem = problem
         self.model = model
-
-    def generate_full_report(self, min_waste, elapsed_time):
+        self.objective_mode = objective_mode
+        
+    # --- ▼▼▼ ここからが修正点です ▼▼▼ ---
+    def generate_full_report(self, min_value, elapsed_time, output_dir):
         """解析、コンソール出力、ファイル保存、可視化の全プロセスを実行"""
         analysis_results = self.analyze_solution()
-        self._print_console_summary(analysis_results, min_waste, elapsed_time)
-        output_dir = self._save_summary_to_file(analysis_results, min_waste, elapsed_time)
-        if output_dir and self.model:
+        self._print_console_summary(analysis_results, min_value, elapsed_time)
+        self._save_summary_to_file(analysis_results, min_value, elapsed_time, output_dir)
+        if self.model:
             visualizer = SolutionVisualizer(self.problem, self.model)
             visualizer.visualize_solution(output_dir)
-        return output_dir
 
-    def report_from_checkpoint(self, analysis, waste):
+    def report_from_checkpoint(self, analysis, value, output_dir):
         """チェックポイントから読み込んだ結果をレポートし、可視化を試みる"""
-        # --- ここからが修正部分 ---
-        # 循環インポートを避けるため、関数内でz3_solverをインポートする
         from z3_solver import Z3Solver
-        # --- ここまでが修正部分 ---
 
-        self._print_console_summary(analysis, waste, 0)
-        output_dir = self._save_summary_to_file(analysis, waste, 0)
-        if output_dir:
-            print("\nAttempting to generate visualization from checkpoint data...")
-            # チェックポイントの解を可視化するため、ソルバーを一時的に利用してモデルを復元
-            temp_solver = Z3Solver(self.problem)
-            temp_solver.solver.add(temp_solver.total_waste_var == waste)
-            
-            if temp_solver.check() == z3.sat:
-                # モデルの復元に成功した場合
-                checkpoint_model = temp_solver.get_model()
-                visualizer = SolutionVisualizer(self.problem, checkpoint_model)
-                visualizer.visualize_solution(output_dir)
-                print(f"   Visualization successfully generated from checkpoint.")
-            else:
-                # モデルの復元に失敗した場合
-                print("\nVisualization could not be generated because the model could not be recreated.")
+        self._print_console_summary(analysis, value, 0)
+        self._save_summary_to_file(analysis, value, 0, output_dir)
+        
+        print("\nAttempting to generate visualization from checkpoint data...")
+        temp_solver = Z3Solver(self.problem, objective_mode=self.objective_mode)
+        temp_solver.opt.add(temp_solver.objective_variable == value)
+        
+        if temp_solver.check() == z3.sat:
+            checkpoint_model = temp_solver.get_model()
+            visualizer = SolutionVisualizer(self.problem, checkpoint_model)
+            visualizer.visualize_solution(output_dir)
+            print(f"   Visualization successfully generated from checkpoint.")
+        else:
+            print("\nVisualization could not be generated because the model could not be recreated.")
+    # --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
                 
     def analyze_solution(self):
-        """ソルバーのモデルを解析し、構造化されたデータとして抽出する"""
+        # (このメソッドは変更なし)
         if not self.model: return None
-        
-        results = {"total_operations": 0, "total_reagent_units": 0, "reagent_usage": {}, "nodes_details": []}
-        
+        results = {"total_operations": 0, "total_reagent_units": 0, "total_waste": 0, "reagent_usage": {}, "nodes_details": []}
         for tree_idx, tree in enumerate(self.problem.forest):
             for level, nodes in tree.items():
                 for node_idx, node in enumerate(nodes):
                     total_input = self.model.eval(z3.Sum(self._get_input_vars(node))).as_long()
                     if total_input == 0: continue
-                    
                     results["total_operations"] += 1
                     reagent_vals = [self.model.eval(r).as_long() for r in node['reagent_vars']]
                     for r_idx, val in enumerate(reagent_vals):
                         if val > 0:
                             results["total_reagent_units"] += val
                             results["reagent_usage"][r_idx] = results["reagent_usage"].get(r_idx, 0) + val
-                    
+                    if 'waste_var' in node:
+                         results["total_waste"] += self.model.eval(node['waste_var']).as_long()
                     results["nodes_details"].append({
                         "target_id": tree_idx, "level": level, "name": f"v_m{tree_idx}_l{level}_k{node_idx}",
                         "total_input": total_input,
@@ -74,68 +68,59 @@ class SolutionReporter:
         return results
 
     def _get_input_vars(self, node):
+        # (このメソッドは変更なし)
         return (node.get('reagent_vars', []) +
                 list(node.get('intra_sharing_vars', {}).values()) +
                 list(node.get('inter_sharing_vars', {}).values()))
 
     def _generate_mixing_description(self, node, tree_idx):
+        # (このメソッドは変更なし)
         desc = []
         for r_idx, r_var in enumerate(node.get('reagent_vars', [])):
             if (val := self.model.eval(r_var).as_long()) > 0:
                 desc.append(f"{val} x Reagent{r_idx+1}")
-        
         for key, w_var in node.get('intra_sharing_vars', {}).items():
             if (val := self.model.eval(w_var).as_long()) > 0:
                 desc.append(f"{val} x v_m{tree_idx}_{key.replace('from_', '')}")
-        
         for key, w_var in node.get('inter_sharing_vars', {}).items():
             if (val := self.model.eval(w_var).as_long()) > 0:
                 m_src, lk_src = key.split('_l')
                 desc.append(f"{val} x v_{m_src.replace('from_m', 'm')}_l{lk_src}")
-        
         return ' + '.join(desc)
 
-    def _print_console_summary(self, results, min_waste, elapsed_time):
+    def _print_console_summary(self, results, min_value, elapsed_time):
+        # (このメソッドは変更なし)
         time_str = f"(in {elapsed_time:.2f} sec)" if elapsed_time > 0 else "(from checkpoint)"
         print(f"\nOptimal Solution Found {time_str}")
-        print(f"Minimum Total Waste: {min_waste}")
+        objective_str = "Minimum Total Waste" if self.objective_mode == "waste" else "Minimum Operations"
+        print(f"{objective_str}: {min_value}")
         print("="*18 + " SUMMARY " + "="*18)
         if results:
             print(f"Total mixing operations: {results['total_operations']}")
+            print(f"Total waste generated: {results['total_waste']}")
             print(f"Total reagent units used: {results['total_reagent_units']}")
             print("\nReagent usage breakdown:")
             for r_idx in sorted(results['reagent_usage'].keys()):
                 print(f"  Reagent {r_idx+1}: {results['reagent_usage'][r_idx]} unit(s)")
         print("="*45)
 
-    def _save_summary_to_file(self, results, min_waste, elapsed_time):
-        base_name = f"({')-('.join(['_'.join(map(str, t['ratios'])) for t in self.problem.targets_config])})"
-        vol_suffix = f"_vol{MAX_SHARING_VOLUME or 'None'}"
-        lvl_suffix = f"_lvl{MAX_LEVEL_DIFF or 'None'}"
-        output_dir = self._get_unique_directory_name(base_name + vol_suffix + lvl_suffix)
-        
-        os.makedirs(output_dir, exist_ok=True)
+    # --- ▼▼▼ ここからが修正点です ▼▼▼ ---
+    def _save_summary_to_file(self, results, min_value, elapsed_time, output_dir):
+        # ディレクトリ名生成ロジックを削除し、引数で受け取ったパスを使用する
         filepath = os.path.join(output_dir, 'summary.txt')
         
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
-                content = self._build_summary_file_content(results, min_waste, elapsed_time, output_dir)
+                content = self._build_summary_file_content(results, min_value, elapsed_time, output_dir)
                 f.write('\n'.join(content))
-            print(f"\nResults successfully saved to: {filepath}")
-            return output_dir
+            print(f"\nResults summary saved to: {filepath}")
         except IOError as e:
             print(f"\nError saving results to file: {e}")
-            return None
+    # --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
 
-    def _get_unique_directory_name(self, base_dir):
-        counter = 1
-        output_dir = base_dir
-        while os.path.isdir(output_dir):
-            output_dir = f"{base_dir}_{counter}"
-            counter += 1
-        return output_dir
-
-    def _build_summary_file_content(self, results, min_waste, elapsed_time, dir_name):
+    def _build_summary_file_content(self, results, min_value, elapsed_time, dir_name):
+        # (このメソッドは変更なし)
+        objective_str = "Minimum Total Waste" if self.objective_mode == "waste" else "Minimum Operations"
         content = [
             "="*40, f"Optimization Results for: {os.path.basename(dir_name)}", "="*40,
             f"\nSolved in {elapsed_time:.2f} seconds." if elapsed_time > 0 else "\nLoaded from checkpoint.",
@@ -143,24 +128,24 @@ class SolutionReporter:
         ]
         for i, target in enumerate(self.problem.targets_config):
             content.extend([f"Target {i+1}:", f"  Ratios: {' : '.join(map(str, target['ratios']))}", f"  Factors: {target['factors']}"])
-        
         content.extend([
             "\n--- Optimization Settings ---",
+            f"Optimization Mode: {self.objective_mode.upper()}",
             f"Max Sharing Volume: {MAX_SHARING_VOLUME or 'No limit'}",
             f"Max Level Difference: {MAX_LEVEL_DIFF or 'No limit'}",
+            f"Max Mixer Size: {MAX_MIXER_SIZE}",
             "-"*28,
-            f"\nMinimum Total Waste: {min_waste}"
+            f"\n{objective_str}: {min_value}"
         ])
-        
         if results:
             content.extend([
                 f"Total mixing operations: {results['total_operations']}",
+                f"Total waste generated: {results['total_waste']}",
                 f"Total reagent units used: {results['total_reagent_units']}",
                 "\n--- Reagent Usage Breakdown ---"
             ])
             for t in sorted(results['reagent_usage'].keys()):
                 content.append(f"  Reagent {t+1}: {results['reagent_usage'][t]} unit(s)")
-            
             content.append("\n\n--- Mixing Process Details ---")
             current_target = -1
             for detail in results["nodes_details"]:

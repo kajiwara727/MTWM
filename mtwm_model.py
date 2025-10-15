@@ -10,30 +10,13 @@ class MTWMProblem:
     変数の定義と、それらの関係性をカプセル化する。
     """
     def __init__(self, targets_config):
-        """
-        コンストラクタ
-
-        Args:
-            targets_config (list): 目標混合液の設定データ。
-        """
         self.targets_config = targets_config
         self.num_reagents = len(targets_config[0]['ratios']) if targets_config else 0
-        
-        # ステップ1: 詳細な親子関係を含むツリー構造を構築
         self.tree_structures = self._build_full_tree_structures()
-        
-        # ステップ2: 構築した構造に基づき、ノードごとにPの値を計算
         self.p_values = self._calculate_p_values_per_node()
-
-        # ステップ3: 確定した構造とPの値を使って変数を定義
         self.forest = self._define_base_variables()
         self.potential_sources_map = self._precompute_potential_sources()
         self._define_sharing_variables()
-
-    def is_leaf(self, m, l, k):
-        """指定されたノードが末端ノード（子を持たない）かどうかを判定する"""
-        node_id = (l, k)
-        return not self.tree_structures[m].get(node_id, {}).get('children')
 
     def _build_full_tree_structures(self):
         """DFMMに基づき、親子関係を含む詳細なツリー構造のフォレストを構築する。"""
