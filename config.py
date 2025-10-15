@@ -2,7 +2,8 @@ RUN_NAME = "Experiment_Default"
 # factorsの決定モードを選択
 # 'auto': DFMMアルゴリズムで最適な因数を自動計算（推奨）
 # 'manual': 下記の 'factors' で指定したリストを直接使用（順番も維持されます）
-FACTORS_MODE = "manual"
+# 'auto_permutations': 'auto'で計算された因数の全ての順列を試し、それぞれで最適化を実行します
+FACTORS_MODE = "auto_permutations"
 
 # チェックポイント機能の有効/無効を切り替える (True: 有効, False: 無効)
 ENABLE_CHECKPOINTING = False
@@ -24,7 +25,7 @@ def _get_targets_for_auto_mode():
     'auto'モードで使用するターゲット設定。'ratios'のみを指定します。
     """
     return [
-        {'name': 'Target 1', 'ratios': [10, 55, 25]},
+        {'name': 'Target 1', 'ratios': [2, 11, 5]},
         {'name': 'Target 2', 'ratios': [12, 5, 1]},
         {'name': 'Target 3', 'ratios': [5, 6, 14]},
         # {'name': 'Target 1', 'ratios': [45, 26, 64]},
@@ -71,7 +72,7 @@ def get_targets_config():
     """
     FACTORS_MODEに応じて、適切なターゲット設定リストを返します。
     """
-    if FACTORS_MODE == 'auto':
+    if FACTORS_MODE in ['auto', 'auto_permutations']:
         return _get_targets_for_auto_mode()
     elif FACTORS_MODE == 'manual':
         return _get_targets_for_manual_mode()

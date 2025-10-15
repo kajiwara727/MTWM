@@ -1,6 +1,7 @@
-# dfmm_utils.py (新規作成)
+# dfmm_utils.py
 import math
 from collections import defaultdict
+import itertools
 
 def find_factors_for_sum(ratio_sum, max_factor):
     """DFMMに基づき、比率の合計値をmax_factor以下の因数に分解する。"""
@@ -18,6 +19,18 @@ def find_factors_for_sum(ratio_sum, max_factor):
             print(f"Error: Could not find factors for sum {ratio_sum}. Failed at {n}.")
             return None
     return sorted(factors, reverse=True)
+
+# --- ▼▼▼ ここからが修正点です (新しい関数) ▼▼▼ ---
+def generate_unique_permutations(factors):
+    """
+    因数リストから、重複を考慮したユニークな順列をすべて生成する。
+    例: [5, 3, 3] -> ([5, 3, 3], [3, 5, 3], [3, 3, 5])
+    """
+    if not factors:
+        return [()]
+    # setで重複する順列を除外してからリストに変換
+    return list(set(itertools.permutations(factors)))
+# --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
 
 def build_dfmm_forest(targets_config):
     """DFMMアルゴリズムに基づき、親子関係を含むツリー構造のフォレストを構築する。"""
@@ -67,10 +80,8 @@ def calculate_p_values_from_structure(forest_structure, targets_config):
             level, k = node_id
             children = tree_structure.get(node_id, {}).get('children', [])
             
-            # 子がいない場合 (混合ツリーの末端)、P値はその階層のfactor
             if not children:
                 p = factors[level]
-            # 子がいる場合、子のP値の最大値に自身のfactorを掛ける
             else:
                 max_child_p = max(get_p_for_node(child_id) for child_id in children)
                 p = max_child_p * factors[level]
