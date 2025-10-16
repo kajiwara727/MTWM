@@ -7,7 +7,7 @@ RUN_NAME = "Random_Experiment_1"
 # 'auto': 各ターゲットの ratios の合計値から factors を自動計算します。
 # 'auto_permutations': 'auto' で計算された factors の全順列を試し、最適な階層構造を探します。
 # 'random': RANDOM_SETTINGS に基づいてランダムなシナリオを複数回実行します。
-FACTOR_EXECUTION_MODE = "manual"
+FACTOR_EXECUTION_MODE = "random"
 # 最適化の目的を設定します。
 # "waste": 廃棄物量の最小化を目指します。
 # "operations": 混合操作の総回数の最小化を目指します。
@@ -30,7 +30,7 @@ RANDOM_SETTINGS = {
     't_reagents': 3,       # ランダムシナリオにおける試薬の種類数。
     'n_targets': 2,        # ランダムシナリオにおけるターゲット（目標混合液）の数。
     'S_ratio_sum': 18,     # ランダムに生成される比率リストの合計値。
-    'k_runs': 1,           # 生成・実行するランダムシナリオの総数。
+    'k_runs': 3,           # 生成・実行するランダムシナリオの総数。
 }
 # --- 'auto' / 'auto_permutations' モード用設定 ---
 # FACTOR_EXECUTION_MODE が 'auto' または 'auto_permutations' の場合に使用されます。
@@ -38,7 +38,7 @@ RANDOM_SETTINGS = {
 TARGETS_FOR_AUTO_MODE = [
     {'name': 'Target 1', 'ratios': [2, 11, 5]},
     {'name': 'Target 2', 'ratios': [12, 5, 1]},
-    {'name': 'Target 3', 'ratios': [5, 6, 14]},
+    # {'name': 'Target 3', 'ratios': [5, 6, 14]},
     # {'name': 'Target 1', 'ratios': [45, 26, 64]},
     # {'name': 'Target 1', 'ratios': [2, 11, 5]},
     # {'name': 'Target 2', 'ratios': [80, 26, 29]},

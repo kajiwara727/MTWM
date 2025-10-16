@@ -3,6 +3,7 @@ import os
 import networkx as nx
 import matplotlib.pyplot as plt
 import z3
+import matplotlib.colors as mcolors
 
 class SolutionVisualizer:
     """
@@ -20,6 +21,7 @@ class SolutionVisualizer:
         'edge': {'width': 1.5, 'arrowsize': 20, 'connectionstyle': 'arc3,rad=0.1'}, # 矢印（エッジ）
         'font': {'font_size': 10, 'font_weight': 'bold', 'font_color': 'black'}, # ラベルフォント
         'edge_label_bbox': dict(facecolor='white', edgecolor='none', alpha=0.7, pad=1), # エッジラベルの背景
+        'edge_colormap': 'viridis', # エッジの重み付けに使用するカラーマップ
     }
     # ノードの配置に関する設定
     LAYOUT_CONFIG = {
@@ -195,13 +197,42 @@ class SolutionVisualizer:
         # ラベル、エッジ、エッジラベルを描画
         labels = {n: d['label'] for n, d in G.nodes(data=True) if n in drawable_nodes and 'label' in d and d.get('type') != 'waste'}
         nx.draw_networkx_labels(G, pos, ax=ax, labels=labels, **self.STYLE_CONFIG['font'])
-        nx.draw_networkx_edges(G, pos, edgelist=drawable_edges, ax=ax, node_size=self.STYLE_CONFIG['mix_node']['size'], **self.STYLE_CONFIG['edge'])
+        
+        # エッジの重みに基づいて色を決定
+        if edge_volumes:
+            volumes = [edge_volumes[edge] for edge in drawable_edges]
+            if volumes:
+                min_vol = min(volumes)
+                max_vol = max(volumes)
+                
+                # 正規化関数
+                norm = mcolors.Normalize(vmin=min_vol, vmax=max_vol)
+                # カラーマップの取得
+                cmap = plt.get_cmap(self.STYLE_CONFIG['edge_colormap'])
+                
+                edge_colors = [cmap(norm(edge_volumes[edge])) for edge in drawable_edges]
+            else:
+                edge_colors = ['gray'] * len(drawable_edges) # エッジがない場合はデフォルト色
+        else:
+            edge_colors = ['gray'] * len(drawable_edges) # edge_volumesが空の場合
+
+        nx.draw_networkx_edges(G, pos, edgelist=drawable_edges, ax=ax, node_size=self.STYLE_CONFIG['mix_node']['size'],
+                               edge_color=edge_colors, # ここで色を指定
+                               **self.STYLE_CONFIG['edge'])
 
         edge_labels = {k: v for k, v in edge_volumes.items() if k in drawable_edges}
         nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
                                      font_size=self.STYLE_CONFIG['font']['font_size'],
                                      font_color=self.STYLE_CONFIG['font']['font_color'],
                                      bbox=self.STYLE_CONFIG['edge_label_bbox'])
+
+        # カラーバーの追加（オプション）
+        if edge_volumes and volumes:
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            cbar = fig.colorbar(sm, ax=ax, orientation='vertical', fraction=0.02, pad=0.04)
+            cbar.set_label("Volume", rotation=270, labelpad=15, fontsize=12)
+
 
         ax.set_title("Mixing Tree Visualization", fontsize=18, pad=20)
         ax.axis('off')
