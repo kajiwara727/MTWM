@@ -1,4 +1,5 @@
 # z3_solver.py (修正版)
+from reporting.reporter import SolutionReporter
 import z3
 import time
 from config import MAX_SHARING_VOLUME
