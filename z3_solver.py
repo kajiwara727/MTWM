@@ -1,7 +1,6 @@
 # z3_solver.py (修正版)
 import z3
 import time
-from reporting import SolutionReporter
 from config import MAX_SHARING_VOLUME
 
 # --- ヘルパー関数 (変更なし) ---

@@ -1,4 +1,4 @@
-# visualization.py
+# reporting/visualizer.py
 import os
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -95,11 +95,11 @@ class SolutionVisualizer:
     def _parse_source_node_name(self, key, dest_tree_idx):
         """共有変数のキー文字列から供給元ノード名を復元する"""
         key = key.replace('from_', '')
-        if key.startswith('m'): # Inter-sharing: "m0_l1k0"
+        if key.startswith('m'):
             m_src, lk_src = key.split('_l')
             l_src, k_src = lk_src.split('k')
             return f"{m_src}_l{l_src}_k{k_src}"
-        else: # Intra-sharing: "l1k0"
+        else:
             l_src, k_src = key.split('k')
             return f"m{dest_tree_idx}_l{l_src.replace('l','')}_k{k_src}"
 

@@ -1,8 +1,8 @@
-# reporting.py (修正版)
+# reporting/reporter.py
 import os
 import z3
 from config import MAX_SHARING_VOLUME, MAX_LEVEL_DIFF, MAX_MIXER_SIZE
-from visualization import SolutionVisualizer
+from .visualizer import SolutionVisualizer
 
 class SolutionReporter:
     """Z3ソルバーの結果を解析し、テキストベースのレポートを生成するクラス"""
@@ -12,7 +12,6 @@ class SolutionReporter:
         self.model = model
         self.objective_mode = objective_mode
         
-    # --- ▼▼▼ ここからが修正点です ▼▼▼ ---
     def generate_full_report(self, min_value, elapsed_time, output_dir):
         """解析、コンソール出力、ファイル保存、可視化の全プロセスを実行"""
         analysis_results = self.analyze_solution()
@@ -40,10 +39,8 @@ class SolutionReporter:
             print(f"   Visualization successfully generated from checkpoint.")
         else:
             print("\nVisualization could not be generated because the model could not be recreated.")
-    # --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
                 
     def analyze_solution(self):
-        # (このメソッドは変更なし)
         if not self.model: return None
         results = {"total_operations": 0, "total_reagent_units": 0, "total_waste": 0, "reagent_usage": {}, "nodes_details": []}
         for tree_idx, tree in enumerate(self.problem.forest):
@@ -68,13 +65,11 @@ class SolutionReporter:
         return results
 
     def _get_input_vars(self, node):
-        # (このメソッドは変更なし)
         return (node.get('reagent_vars', []) +
                 list(node.get('intra_sharing_vars', {}).values()) +
                 list(node.get('inter_sharing_vars', {}).values()))
 
     def _generate_mixing_description(self, node, tree_idx):
-        # (このメソッドは変更なし)
         desc = []
         for r_idx, r_var in enumerate(node.get('reagent_vars', [])):
             if (val := self.model.eval(r_var).as_long()) > 0:
@@ -89,7 +84,6 @@ class SolutionReporter:
         return ' + '.join(desc)
 
     def _print_console_summary(self, results, min_value, elapsed_time):
-        # (このメソッドは変更なし)
         time_str = f"(in {elapsed_time:.2f} sec)" if elapsed_time > 0 else "(from checkpoint)"
         print(f"\nOptimal Solution Found {time_str}")
         objective_str = "Minimum Total Waste" if self.objective_mode == "waste" else "Minimum Operations"
@@ -104,11 +98,8 @@ class SolutionReporter:
                 print(f"  Reagent {r_idx+1}: {results['reagent_usage'][r_idx]} unit(s)")
         print("="*45)
 
-    # --- ▼▼▼ ここからが修正点です ▼▼▼ ---
     def _save_summary_to_file(self, results, min_value, elapsed_time, output_dir):
-        # ディレクトリ名生成ロジックを削除し、引数で受け取ったパスを使用する
         filepath = os.path.join(output_dir, 'summary.txt')
-        
         try:
             with open(filepath, 'w', encoding='utf-8') as f:
                 content = self._build_summary_file_content(results, min_value, elapsed_time, output_dir)
@@ -116,10 +107,8 @@ class SolutionReporter:
             print(f"\nResults summary saved to: {filepath}")
         except IOError as e:
             print(f"\nError saving results to file: {e}")
-    # --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
 
     def _build_summary_file_content(self, results, min_value, elapsed_time, dir_name):
-        # (このメソッドは変更なし)
         objective_str = "Minimum Total Waste" if self.objective_mode == "waste" else "Minimum Operations"
         content = [
             "="*40, f"Optimization Results for: {os.path.basename(dir_name)}", "="*40,

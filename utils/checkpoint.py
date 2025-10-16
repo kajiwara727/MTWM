@@ -1,13 +1,12 @@
-# checkpoint_handler.py
+# utils/checkpoint.py
 import pickle
 import os
-from utils import generate_config_hash
+from .helpers import generate_config_hash
 
 class CheckpointHandler:
     """
     計算の途中結果（チェックポイント）の保存と読み込みを管理するクラス。
     """
-    # --- ▼▼▼ ここからが修正点です ▼▼▼ ---
     def __init__(self, targets_config, mode, run_name, config_hash):
         """
         コンストラクタ
@@ -28,7 +27,6 @@ class CheckpointHandler:
         設定ハッシュに基づき、一意のファイル名を生成する。
         """
         return f"checkpoint_{self.config_hash}.pkl"
-    # --- ▲▲▲ ここまでが修正点です ▲▲▲ ---
 
     def save_checkpoint(self, analysis_results, best_value, elapsed_time):
         """
@@ -37,7 +35,7 @@ class CheckpointHandler:
         print(f"Checkpoint saved to {self.checkpoint_file}. Current best {self.mode}: {best_value}")
         
         data_to_save = {
-            'run_name': self.run_name, # 実行名も保存
+            'run_name': self.run_name,
             'targets_config': self.targets_config,
             'mode': self.mode,
             'analysis_results': analysis_results,
@@ -60,7 +58,6 @@ class CheckpointHandler:
             with open(self.checkpoint_file, 'rb') as f:
                 data = pickle.load(f)
                 
-            # 保存された設定と現在の設定が一致するかを厳密にチェック
             current_hash_check = generate_config_hash(self.targets_config, self.mode, self.run_name)
             if self.config_hash != current_hash_check:
                 print("Warning: Checkpoint file is for a different configuration. Starting fresh.")

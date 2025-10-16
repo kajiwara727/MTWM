@@ -1,19 +1,18 @@
-# pre_run_analyzer.py
+# reporting/analyzer.py
 import os
 
 class PreRunAnalyzer:
     """
-    最適化実行前の事前チェック（P値検証、共有可能性）を行い、
-    結果を単一のレポートファイルに保存するクラス。
+    最適化実行前の事前チェックを行い、結果をレポートファイルに保存するクラス。
     """
     def __init__(self, problem, tree_structures):
         self.problem = problem
-        self.tree_structures = tree_structures # ツリー構造を保持
+        self.tree_structures = tree_structures
 
     def generate_report(self, output_dir):
         filepath = os.path.join(output_dir, "_pre_run_analysis.txt")
         content = []
-        content.extend(self._build_tree_structure_section()) # 新しいセクションを追加
+        content.extend(self._build_tree_structure_section())
         content.append("\n\n" + "="*55 + "\n")
         content.extend(self._build_p_values_section())
         content.append("\n\n" + "="*55 + "\n")
@@ -45,7 +44,7 @@ class PreRunAnalyzer:
 
     def _build_p_values_section(self):
         """P値の検証レポートセクションを構築する。"""
-        content = ["--- Section 1: Calculated P-values per Node ---"]
+        content = ["--- Section 2: Calculated P-values per Node ---"]
         for m, p_tree in enumerate(self.problem.p_values):
             target_info = self.problem.targets_config[m]
             content.append(f"\n[Target: {target_info['name']}] (Ratios: {target_info['ratios']}, Factors: {target_info['factors']})")
@@ -60,7 +59,7 @@ class PreRunAnalyzer:
 
     def _build_sharing_potential_section(self):
         """共有可能性の検証レポートセクションを構築する。"""
-        content = ["--- Section 2: Potential Sharing Connections (with P-values for validation) ---"]
+        content = ["--- Section 3: Potential Sharing Connections (with P-values for validation) ---"]
         if not self.problem.potential_sources_map:
             content.append("\nNo potential sharing connections were found.")
             return content

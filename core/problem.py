@@ -1,5 +1,4 @@
-# mtwm_model.py (修正版)
-import math
+# core/problem.py
 import z3
 import itertools
 from config import MAX_LEVEL_DIFF
@@ -15,7 +14,6 @@ class MTWMProblem:
         """
         self.targets_config = targets_config
         self.num_reagents = len(targets_config[0]['ratios']) if targets_config else 0
-        # 外部で生成された正確な構造とP値を使用
         self.tree_structures = tree_structures
         self.p_values = p_values
         
@@ -26,10 +24,8 @@ class MTWMProblem:
     def _define_base_variables(self):
         """混合ノード、濃度、試薬に関する基本変数を定義する。"""
         forest = []
-        # self.tree_structures を直接使用する
         for m, tree_structure in enumerate(self.tree_structures):
             tree_data = {}
-            # (以降のこのメソッドのコードは変更なし)
             levels = sorted({l for l, k in tree_structure.keys()})
             for l in levels:
                 nodes_at_level = sorted([k for l_node, k in tree_structure.keys() if l_node == l])
@@ -54,7 +50,6 @@ class MTWMProblem:
             if l_src <= l_dst: continue
             if MAX_LEVEL_DIFF is not None and l_src > l_dst + MAX_LEVEL_DIFF: continue
             
-            # Pの値をノードごとに取得
             p_dst = self.p_values[m_dst][(l_dst, k_dst)]
             f_dst = self.targets_config[m_dst]['factors'][l_dst]
             p_src = self.p_values[m_src][(l_src, k_src)]
