@@ -139,7 +139,7 @@ class Z3Solver:
         self._set_leaf_node_constraints()
         self._set_mixer_capacity_constraints()
         self._set_range_constraints()
-        self._set_symmetry_breaking_constraints()
+        # self._set_symmetry_breaking_constraints()
         self._set_activity_constraints()
 
     def _set_initial_constraints(self):

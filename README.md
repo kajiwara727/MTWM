@@ -284,3 +284,8 @@ Total reagent units used: 38
     - 最終製品であるv_m0_l0_k0（Product_A）は、試薬1と3、そして中間液v_m0_l1_k0 だけでなく、ターゲット2の中間液であるv_m1_l1_k0も利用して作られていることが分かります。
 
 このように、可視化レポートと詳細レポートを突き合わせることで、ソルバーがどのようにして廃棄物を削減する複雑な共有パスを発見したかを正確に理解することができます。
+
+# 元の論文
+これは以下の論文で提案された手法を実装したものです.
+[Multi-target Fluid Mixing in MEDA Biochips: Theory and an Attempt toward Waste Minimization]([Debraj Kundu, Sudip Roy, 2023])
+https://dl.acm.org/doi/full/10.1145/3622785
