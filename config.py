@@ -16,7 +16,7 @@ ENABLE_CHECKPOINTING = False
 # --- 制約条件 ---
 
 # ノード間で共有（中間液を融通）できる液量の最大値を設定します。Noneの場合は無制限です。
-MAX_SHARING_VOLUME = 3
+MAX_SHARING_VOLUME = None
 # 中間液を共有する際の、供給元と供給先の階層レベル（level）の差の最大値を設定します。Noneの場合は無制限です。
 MAX_LEVEL_DIFF = None
 # 1回の混合操作で使用できるミキサーの最大容量（入力の合計値）を設定します。これはDFMMアルゴリズムで混合ツリーの階層を決定する際の因数の最大値にもなります。

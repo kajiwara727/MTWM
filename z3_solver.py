@@ -237,15 +237,6 @@ class Z3Solver:
                         total_input_k = z3.Sum(_get_node_inputs(nodes[k]))
                         total_input_k1 = z3.Sum(_get_node_inputs(nodes[k+1]))
                         self.opt.add(total_input_k >= total_input_k1)
-        # 最新変更
-        if self.problem.num_reagents > 1:
-            for m, tree in enumerate(self.problem.forest):
-                for l, nodes in tree.items():
-                    if l == 0:  # ルートノードは除外
-                        continue
-                    for node in nodes:
-                        # 試薬0 >= 試薬1 という制約を追加
-                        self.opt.add(node['ratio_vars'][0] >= node['ratio_vars'][1])
                         
     def _set_activity_constraints(self):
         """中間ノードが液体を生成した場合、その液体は必ずどこかで使用されなければならない。"""
