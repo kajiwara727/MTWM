@@ -1,5 +1,5 @@
 # 実行名を定義します。出力ディレクトリの名前の一部として使用されます。
-RUN_NAME = "multi-200-check"
+RUN_NAME = "auto-18-18(90)-25check"
 # 混合ツリーの階層構造（factors）を決定するモードを選択します。
 # 'manual': TARGETS_FOR_MANUAL_MODE で定義された factors を手動で設定します。
 # 'auto': 各ターゲットの ratios の合計値から factors を自動計算します。
@@ -51,9 +51,9 @@ RANDOM_SETTINGS = {
 # FACTOR_EXECUTION_MODE が 'auto' または 'auto_permutations' の場合に使用されます。
 # 'factors' を指定する必要はありません。自動で計算されます。
 TARGETS_FOR_AUTO_MODE = [
-    {'name': 'Target 1', 'ratios': [97, 97, 6]},
-    {'name': 'Target 1', 'ratios': [97, 97, 6]},
-    # {'name': 'Target 1', 'ratios': [97, 97, 6]},
+    {'name': 'Target 1', 'ratios': [2,15,1]},
+    {'name': 'Target 1', 'ratios': [65, 10, 15]},
+    {'name': 'Target 1', 'ratios': [12,3,10]},
     # {'name': 'Target 1', 'ratios': [14, 10, 1]},
     # {'name': 'Target 2', 'ratios': [7, 8, 10]},
     # {'name': 'Target 3', 'ratios': [5, 12, 8]},
