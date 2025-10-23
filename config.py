@@ -1,17 +1,22 @@
 # 実行名を定義します。出力ディレクトリの名前の一部として使用されます。
-RUN_NAME = "auto-18-18(90)-25check"
+RUN_NAME = "manual-check"
 # 混合ツリーの階層構造（factors）を決定するモードを選択します。
 # 'manual': TARGETS_FOR_MANUAL_MODE で定義された factors を手動で設定します。
 # 'auto': 各ターゲットの ratios の合計値から factors を自動計算します。
 # 'auto_permutations': 'auto' で計算された factors の全順列を試し、最適な階層構造を探します。
 # 'random': RANDOM_SETTINGS に基づいてランダムなシナリオを複数回実行します。
-FACTOR_EXECUTION_MODE = "auto"
+#  FACTOR_EXECUTION_MODEの選択肢に 'file_load' を追加
+FACTOR_EXECUTION_MODE = "file_load"
 # 最適化の目的を設定します。
 # "waste": 廃棄物量の最小化を目指します。
 # "operations": 混合操作の総回数の最小化を目指します。
 OPTIMIZATION_MODE = "waste"
 # チェックポイント機能を有効にするかどうかを設定します。Trueにすると、中断された計算を再開できます。
 ENABLE_CHECKPOINTING = False
+
+# ファイルから Target Configuration を読み込む場合に、そのファイル名を設定します。
+# ランダム実行で生成したファイル名 (例: "manual-check_eb8386bc_1/random_configs.json") を設定すると、そこから最初のパターンを読み込みます。
+CONFIG_LOAD_FILE = "random_configs.json"
 
 # --- 制約条件 ---
 
@@ -51,9 +56,10 @@ RANDOM_SETTINGS = {
 # FACTOR_EXECUTION_MODE が 'auto' または 'auto_permutations' の場合に使用されます。
 # 'factors' を指定する必要はありません。自動で計算されます。
 TARGETS_FOR_AUTO_MODE = [
-    {'name': 'Target 1', 'ratios': [2,15,1]},
-    {'name': 'Target 1', 'ratios': [65, 10, 15]},
-    {'name': 'Target 1', 'ratios': [12,3,10]},
+    # {'name': 'Target 1', 'ratios': [2,15,1]},
+    # {'name': 'Target 1', 'ratios': [65, 10, 15]},
+    # {'name': 'Target 1', 'ratios': [12,3,10]},
+    # {'name': 'Target 1', 'ratios': [1,8,9]},
     # {'name': 'Target 1', 'ratios': [14, 10, 1]},
     # {'name': 'Target 2', 'ratios': [7, 8, 10]},
     # {'name': 'Target 3', 'ratios': [5, 12, 8]},
@@ -81,7 +87,7 @@ TARGETS_FOR_MANUAL_MODE = [
     # {'name': 'Target 2', 'ratios': [80, 26, 29], 'factors': [3, 3, 3, 5]},
     # {'name': 'Target 1', 'ratios': [10, 55, 25], 'factors': [3, 5, 3, 2]},
     # {'name': 'Target 1', 'ratios': [10, 55, 25], 'factors': [3, 5, 3, 2]},
-    # {'name': 'Target 1', 'ratios': [2, 11, 5], 'factors': [3, 3, 2]},
+    {'name': 'Target 1', 'ratios': [2, 11, 5], 'factors': [3, 3, 2]},
     # {'name': 'Target 2', 'ratios': [25, 60, 5], 'factors': [3, 5, 3, 2]},
     # {'name': 'Target 3', 'ratios': [4, 5, 9], 'factors': [3, 3, 2]},
     # {'name': 'Target 3', 'ratios': [3, 5, 10], 'factors': [3, 3, 2]},
@@ -91,11 +97,11 @@ TARGETS_FOR_MANUAL_MODE = [
     # {'name': 'Target 4', 'ratios': [6, 33, 36], 'factors': [3, 5, 5]},
 
     # {'name': 'Target 1', 'ratios': [102, 26, 3, 3, 122], 'factors': [4, 4, 4, 4]},
-    {'name': 'Target 1', 'ratios': [2, 11, 5], 'factors': [3, 3, 2]},
-    {'name': 'Target 2', 'ratios': [12, 5, 1], 'factors': [3, 3, 2]},
-    {'name': 'Target 3', 'ratios': [6, 5, 7], 'factors': [3, 3, 2]},
+    # {'name': 'Target 1', 'ratios': [2, 11, 5], 'factors': [3, 3, 2]},
+    # {'name': 'Target 2', 'ratios': [12, 5, 1], 'factors': [3, 3, 2]},
+    # {'name': 'Target 3', 'ratios': [6, 5, 7], 'factors': [3, 3, 2]},
 
     # {'name': 'Target 1', 'ratios': [10, 55, 25], 'factors': [5, 3, 3, 2]},
-    # {'name': 'Target 2', 'ratios': [60, 25, 5], 'factors': [5, 3, 3, 2]},
+    {'name': 'Target 2', 'ratios': [60, 25, 5], 'factors': [5, 3, 3, 2]},
     # {'name': 'Target 3', 'ratios': [15, 18, 42], 'factors': [3, 5, 5]}
 ]

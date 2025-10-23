@@ -1,5 +1,6 @@
 import os
 import random
+import json
 from .base_runner import BaseRunner
 from core.dfmm import find_factors_for_sum
 from utils.helpers import generate_random_ratios
@@ -20,6 +21,7 @@ class RandomRunner(BaseRunner):
         print(f"All random run results will be saved under: '{base_output_dir}/'")
 
         all_run_results = []
+        saved_configs = [] # <--- 追加: 生成された設定を保存するリスト
 
         for i in range(settings['k_runs']):
             print(f"\n{'='*20} Running Random Simulation {i+1}/{settings['k_runs']} {'='*20}")
@@ -123,4 +125,17 @@ class RandomRunner(BaseRunner):
                 'total_operations': total_ops, 'total_reagents': total_reagents
             })
 
+            # --- 追加: 生成された設定をリストに追加 ---
+            saved_configs.append({
+                'run_name': run_name,
+                'targets': temp_config
+            })
+            # --- 追加ここまで ---
+
         save_random_run_summary(all_run_results, base_output_dir)
+        
+        # --- 追加: 全ての設定をJSONファイルに保存 ---
+        config_log_path = os.path.join(base_output_dir, "random_configs.json")
+        with open(config_log_path, 'w', encoding='utf-8') as f:
+            json.dump(saved_configs, f, indent=4) 
+        print(f"\nAll generated configurations saved to: {config_log_path}")
