@@ -12,10 +12,53 @@ class RandomRunner(BaseRunner):
     config.pyのRANDOM_SETTINGSに基づき、ランダムなシナリオを複数回実行します。
     """
     def run(self):
-        k_runs = self.config.RANDOM_K_RUNS
-        print(f"Preparing to run {k_runs} random simulations...")
+        # 1. Configからランダム実行用の設定を読み込む
+        k_runs = self.config.RANDOM_K_RUNS          # 実行回数 (例: 100)
+        num_targets = self.config.RANDOM_N_TARGETS   # 1回あたりのターゲット数 (例: 3)
+        num_reagents = self.config.RANDOM_T_REAGENTS # 試薬の種類の数 (例: 3)
+        
+        # 比率の合計値 (S_ratio_sum) を決めるルール
+        sequence = self.config.RANDOM_S_RATIO_SUM_SEQUENCE     # 優先度1: 固定シーケンス
+        candidates = self.config.RANDOM_S_RATIO_SUM_CANDIDATES # 優先度2: 候補からランダム
+        default_sum = self.config.RANDOM_S_RATIO_SUM_DEFAULT   # 優先度3: デフォルト値
+        
+        run_name_prefix = self.config.RUN_NAME # config.pyのRUN_NAME (例: "ExperimentA")
 
-        base_run_name = f"{self.config.RUN_NAME}_random_runs"
+        print(f"Preparing to run {k_runs} random simulations...")
+        
+        # 2. ベースとなる出力ディレクトリ名を決定
+        
+        # --- フォルダ名用の比率合計モード文字列を生成 ---
+        ratio_sum_mode_str = ""
+        if sequence and isinstance(sequence, list) and len(sequence) > 0:
+            # 優先度1: 固定シーケンス
+            # (multiplier は無視し、base_sum か数値のみを抽出)
+            seq_parts = []
+            for spec in sequence:
+                if isinstance(spec, dict):
+                    # 辞書の場合は 'base_sum' の値を取得
+                    seq_parts.append(str(spec.get("base_sum", "Err")))
+                elif isinstance(spec, (int, float)):
+                    # 数値の場合はそのまま使用
+                    seq_parts.append(str(spec))
+            # 例: "Seq[18_18_24]"
+            ratio_sum_mode_str = f"Seq[{'_'.join(seq_parts)}]"
+            
+        elif candidates and isinstance(candidates, list) and len(candidates) > 0:
+            # 優先度2: 候補リストからランダム選択
+            # 重複を除きソートして分かりやすくする (例: "Cand[18_24_30]")
+            cand_parts = sorted(list(set(candidates))) 
+            ratio_sum_mode_str = f"Cand[{'_'.join(map(str, cand_parts))}]"
+            
+        else:
+            # 優先度3: デフォルト値 (例: "Def[12]")
+            ratio_sum_mode_str = f"Def[{default_sum}]"
+        # --- ここまで ---
+
+        # (RUN_NAME)-(濃度比)-(目標濃度数)-(試薬数)-(実行数) の順序
+        # (例: "ExperimentA-Def[12]-3targets-3reagents-100runs")
+        base_run_name = f"{run_name_prefix}-{ratio_sum_mode_str}-{num_targets}targets-{num_reagents}reagents-{k_runs}runs"
+        
         base_output_dir = self._get_unique_output_directory_name("random", base_run_name)
         os.makedirs(base_output_dir, exist_ok=True)
         print(f"All random run results will be saved under: '{base_output_dir}/'")
