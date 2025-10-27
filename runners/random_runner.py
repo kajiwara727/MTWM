@@ -12,8 +12,8 @@ class RandomRunner(BaseRunner):
     config.pyのRANDOM_SETTINGSに基づき、ランダムなシナリオを複数回実行します。
     """
     def run(self):
-        settings = self.config.RANDOM_SETTINGS
-        print(f"Preparing to run {settings['k_runs']} random simulations...")
+        k_runs = self.config.RANDOM_K_RUNS
+        print(f"Preparing to run {k_runs} random simulations...")
 
         base_run_name = f"{self.config.RUN_NAME}_random_runs"
         base_output_dir = self._get_unique_output_directory_name("random", base_run_name)
@@ -21,15 +21,15 @@ class RandomRunner(BaseRunner):
         print(f"All random run results will be saved under: '{base_output_dir}/'")
 
         all_run_results = []
-        saved_configs = [] # <--- 追加: 生成された設定を保存するリスト
+        saved_configs = [] 
 
-        for i in range(settings['k_runs']):
-            print(f"\n{'='*20} Running Random Simulation {i+1}/{settings['k_runs']} {'='*20}")
+        for i in range(k_runs):
+            print(f"\n{'='*20} Running Random Simulation {i+1}/{k_runs} {'='*20}")
 
-            # --- 混合比和の決定ロジック ---
-            sequence = settings.get('S_ratio_sum_sequence')
-            candidates = settings.get('S_ratio_sum_candidates')
-            n_targets = settings.get('n_targets', 0)
+            # --- 混合比和の決定ロジック (configから直接読み込む) ---
+            sequence = self.config.RANDOM_S_RATIO_SUM_SEQUENCE
+            candidates = self.config.RANDOM_S_RATIO_SUM_CANDIDATES
+            n_targets = self.config.RANDOM_N_TARGETS
             
             if sequence and isinstance(sequence, list) and len(sequence) == n_targets:
                 mode = 'sequence'
@@ -43,7 +43,7 @@ class RandomRunner(BaseRunner):
 
             else:
                 mode = 'default'
-                default_sum = settings.get('S_ratio_sum', 0)
+                default_sum = self.config.RANDOM_S_RATIO_SUM_DEFAULT
                 specs_for_run = [default_sum] * n_targets
                 print(f"-> Mode: Default. Using single S_ratio_sum '{default_sum}' for all targets.")
             
@@ -73,8 +73,8 @@ class RandomRunner(BaseRunner):
                     break
                 
                 try:
-                    # 1. 基本比率を生成
-                    base_ratios = generate_random_ratios(settings['t_reagents'], base_sum)
+                    # 1. 基本比率を生成 (configから試薬数を読み込む)
+                    base_ratios = generate_random_ratios(self.config.RANDOM_T_REAGENTS, base_sum)
                     # 2. 倍率を適用して最終的な比率を計算
                     ratios = [r * multiplier for r in base_ratios]
                     
@@ -100,7 +100,6 @@ class RandomRunner(BaseRunner):
                 
                 factors = base_factors + multiplier_factors
                 
-                # 【変更点】factorsリストを降順（大きい順）にソートします
                 factors.sort(reverse=True)
                 
                 print(f"     Factors for base ({base_sum}): {base_factors} + Factors for multiplier ({multiplier}): {multiplier_factors} -> Sorted Final Factors: {factors}")
@@ -125,16 +124,13 @@ class RandomRunner(BaseRunner):
                 'total_operations': total_ops, 'total_reagents': total_reagents
             })
 
-            # --- 追加: 生成された設定をリストに追加 ---
             saved_configs.append({
                 'run_name': run_name,
                 'targets': temp_config
             })
-            # --- 追加ここまで ---
 
         save_random_run_summary(all_run_results, base_output_dir)
         
-        # --- 追加: 全ての設定をJSONファイルに保存 ---
         config_log_path = os.path.join(base_output_dir, "random_configs.json")
         with open(config_log_path, 'w', encoding='utf-8') as f:
             json.dump(saved_configs, f, indent=4) 

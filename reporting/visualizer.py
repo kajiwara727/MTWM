@@ -2,7 +2,7 @@
 import os
 import networkx as nx
 import matplotlib.pyplot as plt
-import z3
+# import z3 <--- Z3インポートを削除
 import matplotlib.colors as mcolors
 
 class SolutionVisualizer:
@@ -11,7 +11,7 @@ class SolutionVisualizer:
     有向グラフとして可視化し、画像ファイルとして保存するクラス。
     """
 
-    # グラフの見た目を定義する設定
+    # ... (STYLE_CONFIG と LAYOUT_CONFIG は変更なし) ...
     STYLE_CONFIG = {
         'mix_node': {'color': '#87CEEB', 'size': 2000},       # 中間生成物ノード
         'target_node': {'color': '#90EE90', 'size': 2000},    # 最終ターゲットノード
@@ -23,11 +23,11 @@ class SolutionVisualizer:
         'edge_label_bbox': dict(facecolor='white', edgecolor='none', alpha=0.7, pad=1), # エッジラベルの背景
         'edge_colormap': 'viridis', # エッジの重み付けに使用するカラーマップ
     }
-    # ノードの配置に関する設定
     LAYOUT_CONFIG = {
         'x_gap': 6.0, 'y_gap': 5.0, 'tree_gap': 10.0, # ノード間・ツリー間のギャップ
         'waste_node_offset_x': 3.5, 'waste_node_stagger_y': 0.8, # 廃棄ノードのオフセット
     }
+
 
     def __init__(self, problem, model):
         """
@@ -35,7 +35,7 @@ class SolutionVisualizer:
 
         Args:
             problem (MTWMProblem): 最適化問題の定義オブジェクト。
-            model (z3.ModelRef): Z3ソルバーが見つけた解のモデル。
+            model (OrToolsModelAdapter): ソルバーの解にアクセスするためのアダプタ。
         """
         self.problem = problem
         self.model = model
@@ -57,15 +57,15 @@ class SolutionVisualizer:
 
     def _build_graph_from_model(self):
         """
-        Z3ソルバーのモデルを解析し、networkx用のグラフデータ（ノードとエッジ）を構築します。
+        ソルバーのモデルを解析し、networkx用のグラフデータ（ノードとエッジ）を構築します。
         """
         G = nx.DiGraph()
         edge_volumes = {} # エッジに表示する液量を保存する辞書
 
         # アクティブな（実際に使われている）ノードのみを処理
-        for m, l, k, node, total_input in self._iterate_active_nodes():
-            node_name = f"m{m}_l{l}_k{k}"
-            ratio_vals = [self.model.eval(r).as_long() for r in node['ratio_vars']]
+        for m, l, k, node_def, total_input in self._iterate_active_nodes():
+            node_name = node_def['node_name'] # f"v_m{m}_l{l}_k{k}"
+            ratio_vals = [self.model.eval(r_name).as_long() for r_name in node_def['ratio_vars']]
             # ノードに表示するラベルを生成 (ルートノードは特別扱い)
             label = f"R{m+1}:[{':'.join(map(str, ratio_vals))}]" if l == 0 else ':'.join(map(str, ratio_vals))
 
@@ -73,9 +73,9 @@ class SolutionVisualizer:
             G.add_node(node_name, label=label, level=l, target=m, type='mix')
 
             # 廃棄、試薬、共有の各要素をグラフに追加
-            self._add_waste_node(G, node, node_name)
-            self._add_reagent_edges(G, edge_volumes, node, node_name, l, m)
-            self._add_sharing_edges(G, edge_volumes, node, node_name, m)
+            self._add_waste_node(G, node_def, node_name)
+            self._add_reagent_edges(G, edge_volumes, node_def, node_name, l, m)
+            self._add_sharing_edges(G, edge_volumes, node_def, node_name, m)
 
         return G, edge_volumes
 
@@ -83,38 +83,41 @@ class SolutionVisualizer:
         """モデルで実際に使用されている（総入力が0より大きい）ノードのみを巡回するジェネレータ。"""
         for m, tree in enumerate(self.problem.forest):
             for l, nodes in tree.items():
-                for k, node in enumerate(nodes):
-                    inputs = (node.get('reagent_vars', []) +
-                              list(node.get('intra_sharing_vars', {}).values()) +
-                              list(node.get('inter_sharing_vars', {}).values()))
-                    total_input = self.model.eval(z3.Sum(inputs)).as_long()
+                for k, node_def in enumerate(nodes):
+                    # inputs = (node.get('reagent_vars', []) + ...) <--- 変数名のリストを取得
+                    # total_input = self.model.eval(z3.Sum(inputs)).as_long() <--- z3.Sum を削除
+                    
+                    # OrToolsSolverで計算済みの総入力変数の名前を取得して評価
+                    total_input_var_name = node_def['total_input_var_name']
+                    total_input = self.model.eval(total_input_var_name).as_long()
+                    
                     if total_input > 0:
-                        yield m, l, k, node, total_input
+                        yield m, l, k, node_def, total_input
 
-    def _add_waste_node(self, G, node, parent_name):
+    def _add_waste_node(self, G, node_def, parent_name):
         """ノードに廃棄物があれば、グラフに廃棄ノード（黒点）と非表示エッジを追加する。"""
-        waste_var = node.get('waste_var')
-        if waste_var is not None and self.model.eval(waste_var).as_long() > 0:
+        waste_var_name = node_def.get('waste_var_name')
+        if waste_var_name is not None and self.model.eval(waste_var_name).as_long() > 0:
             waste_node_name = f"waste_{parent_name}"
             G.add_node(waste_node_name, level=G.nodes[parent_name]['level'], target=G.nodes[parent_name]['target'], type='waste')
             # 廃棄ノードを親の右に配置するための非表示エッジ
             G.add_edge(parent_name, waste_node_name, style='invisible')
 
-    def _add_reagent_edges(self, G, edge_volumes, node, dest_name, level, target_idx):
+    def _add_reagent_edges(self, G, edge_volumes, node_def, dest_name, level, target_idx):
         """試薬から混合ノードへのエッジ（矢印）を追加する。"""
-        for r_idx, r_var in enumerate(node.get('reagent_vars', [])):
-            if (r_val := self.model.eval(r_var).as_long()) > 0:
+        for r_idx, r_var_name in enumerate(node_def.get('reagent_vars', [])):
+            if (r_val := self.model.eval(r_var_name).as_long()) > 0:
                 reagent_name = f"Reagent_{dest_name}_t{r_idx}"
                 # 試薬ノードを追加（①, ②, ...）
                 G.add_node(reagent_name, label=chr(0x2460 + r_idx), level=level + 1, target=target_idx, type='reagent')
                 G.add_edge(reagent_name, dest_name, volume=r_val)
                 edge_volumes[(reagent_name, dest_name)] = r_val
 
-    def _add_sharing_edges(self, G, edge_volumes, node, dest_name, dest_tree_idx):
+    def _add_sharing_edges(self, G, edge_volumes, node_def, dest_name, dest_tree_idx):
         """中間液の共有（あるノードから別のノードへの液体の流れ）を表すエッジを追加する。"""
-        all_sharing = {**node.get('intra_sharing_vars',{}), **node.get('inter_sharing_vars',{})}
-        for key, w_var in all_sharing.items():
-            if (val := self.model.eval(w_var).as_long()) > 0:
+        all_sharing = {**node_def.get('intra_sharing_vars',{}), **node_def.get('inter_sharing_vars',{})}
+        for key, w_var_name in all_sharing.items():
+            if (val := self.model.eval(w_var_name).as_long()) > 0:
                 src_name = self._parse_source_node_name(key, dest_tree_idx)
                 G.add_edge(src_name, dest_name, volume=val)
                 edge_volumes[(src_name, dest_name)] = val
@@ -125,10 +128,12 @@ class SolutionVisualizer:
         if key.startswith('m'): # inter-sharing (ツリー間)
             m_src, lk_src = key.split('_l')
             l_src, k_src = lk_src.split('k')
-            return f"{m_src}_l{l_src}_k{k_src}"
+            # return f"{m_src}_l{l_src}_k{k_src}" # <--- 修正前 (例: "m0_l2_k1")
+            return f"v_{m_src}_l{l_src}_k{k_src}" # <--- 修正後 (例: "v_m0_l2_k1")
         else: # intra-sharing (ツリー内)
             l_src, k_src = key.split('k')
-            return f"m{dest_tree_idx}_l{l_src.replace('l','')}_k{k_src}"
+            # return f"m{dest_tree_idx}_l{l_src.replace('l','')}_k{k_src}" # <--- 修正前 (例: "m1_l1_k0")
+            return f"v_m{dest_tree_idx}_l{l_src.replace('l','')}_k{k_src}" # <--- 修正後 (例: "v_m1_l1_k0")
 
     def _calculate_node_positions(self, G):
         """ノードを見やすく配置するための座標（x, y）を計算する。"""
@@ -180,15 +185,25 @@ class SolutionVisualizer:
     def _draw_graph(self, G, pos, edge_volumes, output_dir):
         """計算された座標に基づき、matplotlibでグラフを描画しPNGファイルとして保存する。"""
         fig, ax = plt.subplots(figsize=(20, 12))
-
+        
+        # --- 描画エラー防止の修正 ---
+        # pos辞書に座標が存在するノードとエッジのみを描画対象とする
         drawable_nodes = [n for n in G.nodes() if n in pos]
         drawable_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get('style') != 'invisible' and u in pos and v in pos]
 
+        if not drawable_nodes:
+             print("Warning: No drawable nodes with positions found. Skipping visualization.")
+             plt.close(fig)
+             return
+
         node_styles = {n: self._get_node_style(G.nodes[n]) for n in drawable_nodes}
+        
+        # --- 修正ここまで ---
 
         # ノードの形状ごとに描画（matplotlibの仕様）
         for shape in {s['shape'] for s in node_styles.values()}:
             nodelist = [n for n, s in node_styles.items() if s['shape'] == shape]
+            if not nodelist: continue # この形状のノードがなければスキップ
             nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=nodelist, node_shape=shape,
                                    node_size=[node_styles[n]['size'] for n in nodelist],
                                    node_color=[node_styles[n]['color'] for n in nodelist],
@@ -199,36 +214,44 @@ class SolutionVisualizer:
         nx.draw_networkx_labels(G, pos, ax=ax, labels=labels, **self.STYLE_CONFIG['font'])
         
         # エッジの重みに基づいて色を決定
-        if edge_volumes:
-            volumes = [edge_volumes[edge] for edge in drawable_edges]
+        volumes = []
+        if edge_volumes and drawable_edges:
+            volumes = [edge_volumes.get(edge, 0) for edge in drawable_edges]
             if volumes:
                 min_vol = min(volumes)
-                max_vol = max(volumes)
+                max_vol = max(volumes) if max(volumes) > min(volumes) else min(volumes) + 1 # 最小と最大が同じ場合のゼロ除算エラー回避
                 
                 # 正規化関数
                 norm = mcolors.Normalize(vmin=min_vol, vmax=max_vol)
                 # カラーマップの取得
                 cmap = plt.get_cmap(self.STYLE_CONFIG['edge_colormap'])
                 
-                edge_colors = [cmap(norm(edge_volumes[edge])) for edge in drawable_edges]
+                edge_colors = [cmap(norm(edge_volumes.get(edge, 0))) for edge in drawable_edges]
             else:
                 edge_colors = ['gray'] * len(drawable_edges) # エッジがない場合はデフォルト色
         else:
             edge_colors = ['gray'] * len(drawable_edges) # edge_volumesが空の場合
 
-        nx.draw_networkx_edges(G, pos, edgelist=drawable_edges, ax=ax, node_size=self.STYLE_CONFIG['mix_node']['size'],
-                               edge_color=edge_colors, # ここで色を指定
-                               **self.STYLE_CONFIG['edge'])
+        if drawable_edges:
+            nx.draw_networkx_edges(G, pos, edgelist=drawable_edges, ax=ax, 
+                                   # drawable_nodesのサイズリストから適切なサイズを選ぶ（ここでは簡略化）
+                                   node_size=self.STYLE_CONFIG['mix_node']['size'], 
+                                   edge_color=edge_colors, # ここで色を指定
+                                   **self.STYLE_CONFIG['edge'])
 
-        edge_labels = {k: v for k, v in edge_volumes.items() if k in drawable_edges}
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
-                                     font_size=self.STYLE_CONFIG['font']['font_size'],
-                                     font_color=self.STYLE_CONFIG['font']['font_color'],
-                                     bbox=self.STYLE_CONFIG['edge_label_bbox'])
+            edge_labels = {k: v for k, v in edge_volumes.items() if k in drawable_edges}
+            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
+                                         font_size=self.STYLE_CONFIG['font']['font_size'],
+                                         font_color=self.STYLE_CONFIG['font']['font_color'],
+                                         bbox=self.STYLE_CONFIG['edge_label_bbox'])
+        else:
+            print("No drawable edges found.")
+
 
         # カラーバーの追加（オプション）
         if edge_volumes and volumes:
-            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            # sm = plt.cm.ScalarMable(cmap=cmap, norm=norm) # <--- 修正前
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm) # <--- 修正後
             sm.set_array([])
             cbar = fig.colorbar(sm, ax=ax, orientation='vertical', fraction=0.02, pad=0.04)
             cbar.set_label("Volume", rotation=270, labelpad=15, fontsize=12)

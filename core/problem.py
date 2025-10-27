@@ -1,18 +1,17 @@
 # core/problem.py
-import z3
 import itertools
 from config import MAX_LEVEL_DIFF
 
 class MTWMProblem:
     """
     MTWM (Multi-Target Waste Minimization) 問題の構造を定義、管理するクラス。
-    最適化に必要な変数（液量、比率など）をz3の変数として定義し、
+    最適化に必要な変数（液量、比率など）の「名前」を定義し、
     それらの関係性をカプセル化します。
     """
     def __init__(self, targets_config, tree_structures, p_values):
         """
         コンストラクタ。
-        事前計算されたツリー構造とP値を受け取り、z3の変数を初期化します。
+        事前計算されたツリー構造とP値を受け取り、変数の名前を初期化します。
 
         Args:
             targets_config (list): ターゲット設定のリスト。
@@ -24,17 +23,17 @@ class MTWMProblem:
         self.tree_structures = tree_structures
         self.p_values = p_values
 
-        # 基本変数（ノード、比率、試薬量）を定義
+        # 基本変数（ノード、比率、試薬量）の「名前」を定義
         self.forest = self._define_base_variables()
         # ノード間の共有可能性を事前計算
         self.potential_sources_map = self._precompute_potential_sources()
-        # 共有液量を表す変数を定義
+        # 共有液量を表す変数の「名前」を定義
         self._define_sharing_variables()
 
     def _define_base_variables(self):
         """
-        混合ノード、濃度（比率）、試薬投入量を表すz3の基本変数を定義します。
-        これらの変数が最適化ソルバーによって解かれます。
+        混合ノード、濃度（比率）、試薬投入量を表す変数の「名前」（文字列）を定義します。
+        これらの名前がソルバーによって実際の変数にマッピングされます。
         """
         forest = []
         for m, tree_structure in enumerate(self.tree_structures):
@@ -45,12 +44,16 @@ class MTWMProblem:
                 nodes_at_level = sorted([k for l_node, k in tree_structure.keys() if l_node == l])
                 level_nodes = [
                     {
-                        # 各ノード（ミキサー）自体を表す変数 (デバッグ用、現在未使用)
-                        'node_var': z3.Int(f"v_m{m}_l{l}_k{k}"),
-                        # ノード内の各試薬の比率を表す変数
-                        'ratio_vars': [z3.Int(f"R_m{m}_l{l}_k{k}_t{t}") for t in range(self.num_reagents)],
-                        # ノードに直接投入される各試薬の量を表す変数
-                        'reagent_vars': [z3.Int(f"r_m{m}_l{l}_k{k}_t{t}") for t in range(self.num_reagents)]
+                        # 各ノード（ミキサー）自体を表す変数 (デバッグ用)
+                        'node_name': f"v_m{m}_l{l}_k{k}",
+                        # ノード内の各試薬の比率を表す変数名
+                        'ratio_vars': [f"R_m{m}_l{l}_k{k}_t{t}" for t in range(self.num_reagents)],
+                        # ノードに直接投入される各試薬の量を表す変数名
+                        'reagent_vars': [f"r_m{m}_l{l}_k{k}_t{t}" for t in range(self.num_reagents)],
+                        # (ソルバーが設定する) 総入力の変数名
+                        'total_input_var_name': f"TotalInput_m{m}_l{l}_k{k}",
+                        # (ソルバーが設定する) 廃棄物量の変数名
+                        'waste_var_name': f"waste_m{m}_l{l}_k{k}" if l > 0 else None
                     }
                     for k in nodes_at_level
                 ]
@@ -92,7 +95,7 @@ class MTWMProblem:
     def _create_sharing_vars_for_node(self, m_dst, l_dst, k_dst):
         """
         単一の供給先ノードに対して、事前計算された供給元候補から
-        共有液量を表すz3変数（w_intra, w_inter）の辞書を作成します。
+        共有液量を表す変数「名前」の辞書を作成します。
         """
         potential_sources = self.potential_sources_map.get((m_dst, l_dst, k_dst), [])
         intra_vars, inter_vars = {}, {}
@@ -102,17 +105,17 @@ class MTWMProblem:
                 # 同じツリー内での共有 (intra-sharing)
                 key = f"from_l{l_src}k{k_src}"
                 name = f"w_intra_m{m_dst}_from_l{l_src}k{k_src}_to_l{l_dst}k{k_dst}"
-                intra_vars[key] = z3.Int(name)
+                intra_vars[key] = name
             else:
                 # 異なるツリー間での共有 (inter-sharing)
                 key = f"from_m{m_src}_l{l_src}k{k_src}"
                 name = f"w_inter_from_m{m_src}l{l_src}k{k_src}_to_m{m_dst}l{l_dst}k{k_dst}"
-                inter_vars[key] = z3.Int(name)
+                inter_vars[key] = name
         return intra_vars, inter_vars
 
     def _define_sharing_variables(self):
         """
-        全てのノードに対して共有変数を定義し、各ノードのデータ構造に割り当てます。
+        全てのノードに対して共有変数名を定義し、各ノードのデータ構造に割り当てます。
         """
         for m_dst, tree_dst in enumerate(self.forest):
             for l_dst, nodes_dst in tree_dst.items():

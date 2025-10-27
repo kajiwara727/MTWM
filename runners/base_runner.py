@@ -6,12 +6,10 @@ from abc import ABC, abstractmethod
 # これらは、各ランナーが共通して使用するコアコンポーネントです。
 from core.problem import MTWMProblem
 from core.dfmm import build_dfmm_forest, calculate_p_values_from_structure
-# from z3_solver import Z3Solver  # <--- この行を削除
-from or_tools_solver import OrToolsSolver # <--- この行を追加
+from core.or_tools_solver import OrToolsSolver 
 
 from reporting.analyzer import PreRunAnalyzer
 from reporting.reporter import SolutionReporter
-from utils.checkpoint import CheckpointHandler
 from utils.helpers import generate_config_hash
 
 class BaseRunner(ABC):
@@ -57,7 +55,7 @@ class BaseRunner(ABC):
         2. 混合ツリーとP値の計算
         3. 問題オブジェクトの構築
         4. 事前分析レポートの生成
-        5. Z3ソルバーの実行
+        5. ソルバーの実行
         6. 結果レポートの生成
         """
         print("\n--- Configuration for this run ---")
@@ -79,18 +77,17 @@ class BaseRunner(ABC):
         analyzer = PreRunAnalyzer(problem, tree_structures)
         analyzer.generate_report(output_dir)
 
-        # 4. Z3ソルバーを初期化
-        # solver = Z3Solver(problem, objective_mode=self.config.OPTIMIZATION_MODE) # <--- この行を削除
-        solver = OrToolsSolver(problem, objective_mode=self.config.OPTIMIZATION_MODE) # <--- この行に変更
+        # 4. OrToolsソルバーを初期化
+        solver = OrToolsSolver(
+            problem, 
+            objective_mode=self.config.OPTIMIZATION_MODE,
+            max_workers=self.config.MAX_CPU_WORKERS
+        ) 
         
-        checkpoint_handler = None
-        # チェックポイント機能が有効な場合、ハンドラを初期化
-        if self.config.ENABLE_CHECKPOINTING and self.config.MODE != 'auto_permutations':
-            config_hash = generate_config_hash(targets_config_for_run, self.config.OPTIMIZATION_MODE, run_name_for_report)
-            checkpoint_handler = CheckpointHandler(targets_config_for_run, self.config.OPTIMIZATION_MODE, run_name_for_report, config_hash)
-
         # 5. 最適化を実行
-        best_model, final_value, last_analysis, elapsed_time = solver.solve(checkpoint_handler)
+        # best_model, final_value, last_analysis, elapsed_time = solver.solve(checkpoint_handler) # <--- 修正前
+        best_model, final_value, analysis_results, elapsed_time = solver.solve() # <--- 修正後
+
         reporter = SolutionReporter(problem, best_model, objective_mode=self.config.OPTIMIZATION_MODE)
 
         ops = 'N/A'
@@ -98,20 +95,20 @@ class BaseRunner(ABC):
 
         # 6. 結果に応じてレポートを生成
         if best_model:
-            # 新しい解が見つかった場合
-            reporter.generate_full_report(final_value, elapsed_time, output_dir)
-            analysis_results = reporter.analyze_solution()
-            ops = analysis_results.get('total_operations', 'N/A')
-            reagents = analysis_results.get('total_reagent_units', 'N/A')
-        elif last_analysis and checkpoint_handler:
-            # 新しい解は見つからなかったが、チェックポイントの解がある場合
-            ops = last_analysis.get('total_operations', 'N/A')
-            reagents = last_analysis.get('total_reagent_units', 'N/A')
-            elapsed_time = last_analysis.get('elapsed_time', 0) if last_analysis else 0
-            reporter.report_from_checkpoint(last_analysis, final_value, output_dir)
+            # 新しい解が見つかった場合 (ENABLE_VISUALIZATION を渡す)
+            reporter.generate_full_report(
+                final_value, 
+                elapsed_time, 
+                output_dir, 
+                self.config.ENABLE_VISUALIZATION
+            ) 
+            
+            if analysis_results:
+                ops = analysis_results.get('total_operations', 'N/A')
+                reagents = analysis_results.get('total_reagent_units', 'N/A')
+        
         else:
             # 解が見つからなかった場合
             print("\n--- No solution found for this configuration ---")
-
         # 'random'モードのサマリー用に結果を返す
         return final_value, elapsed_time, ops, reagents
