@@ -18,9 +18,9 @@ class RandomRunner(BaseRunner):
         num_reagents = self.config.RANDOM_T_REAGENTS # 試薬の種類の数 (例: 3)
         
         # 比率の合計値 (S_ratio_sum) を決めるルール
-        sequence = self.config.RANDOM_S_RATIO_SUM_SEQUENCE     # 優先度1: 固定シーケンス
-        candidates = self.config.RANDOM_S_RATIO_SUM_CANDIDATES # 優先度2: 候補からランダム
-        default_sum = self.config.RANDOM_S_RATIO_SUM_DEFAULT   # 優先度3: デフォルト値
+        sequence = self.config.RANDOM_S_RATIO_SUM_SEQUENCE     # オプション1: 固定シーケンス
+        candidates = self.config.RANDOM_S_RATIO_SUM_CANDIDATES # オプション2: 候補からランダム
+        default_sum = self.config.RANDOM_S_RATIO_SUM_DEFAULT   # オプション3: デフォルト値
         
         run_name_prefix = self.config.RUN_NAME # config.pyのRUN_NAME (例: "ExperimentA")
 
@@ -31,7 +31,7 @@ class RandomRunner(BaseRunner):
         # --- フォルダ名用の比率合計モード文字列を生成 ---
         ratio_sum_mode_str = ""
         if sequence and isinstance(sequence, list) and len(sequence) > 0:
-            # 優先度1: 固定シーケンス
+            # オプション1 (固定シーケンス) が使われた場合
             # (multiplier は無視し、base_sum か数値のみを抽出)
             seq_parts = []
             for spec in sequence:
@@ -45,13 +45,13 @@ class RandomRunner(BaseRunner):
             ratio_sum_mode_str = f"Seq[{'_'.join(seq_parts)}]"
             
         elif candidates and isinstance(candidates, list) and len(candidates) > 0:
-            # 優先度2: 候補リストからランダム選択
+            # オプション2 (候補リストからランダム) が使われた場合
             # 重複を除きソートして分かりやすくする (例: "Cand[18_24_30]")
             cand_parts = sorted(list(set(candidates))) 
             ratio_sum_mode_str = f"Cand[{'_'.join(map(str, cand_parts))}]"
             
         else:
-            # 優先度3: デフォルト値 (例: "Def[12]")
+            # オプション3 (デフォルト値) が使われた場合 (例: "Def[12]")
             ratio_sum_mode_str = f"Def[{default_sum}]"
         # --- ここまで ---
 
@@ -70,21 +70,25 @@ class RandomRunner(BaseRunner):
             print(f"\n{'='*20} Running Random Simulation {i+1}/{k_runs} {'='*20}")
 
             # --- 混合比和の決定ロジック (configから直接読み込む) ---
+            # (config.py の設定に基づき、いずれか1つのオプションが選択される)
             sequence = self.config.RANDOM_S_RATIO_SUM_SEQUENCE
             candidates = self.config.RANDOM_S_RATIO_SUM_CANDIDATES
             n_targets = self.config.RANDOM_N_TARGETS
             
             if sequence and isinstance(sequence, list) and len(sequence) == n_targets:
+                # オプション1: 固定シーケンス
                 mode = 'sequence'
                 specs_for_run = sequence
                 print(f"-> Mode: Fixed Sequence. Using S_ratio_sum specifications: {specs_for_run}")
             
             elif candidates and isinstance(candidates, list) and len(candidates) > 0:
+                # オプション2: 候補リストからランダム選択
                 mode = 'random_candidates'
                 specs_for_run = [random.choice(candidates) for _ in range(n_targets)]
                 print(f"-> Mode: Random per Target. Generated S_ratio_sum specifications for this run: {specs_for_run}")
 
             else:
+                # オプション3: デフォルト値
                 mode = 'default'
                 default_sum = self.config.RANDOM_S_RATIO_SUM_DEFAULT
                 specs_for_run = [default_sum] * n_targets

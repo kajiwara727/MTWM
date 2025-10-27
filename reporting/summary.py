@@ -1,12 +1,17 @@
 # reporting/summary.py (修正版)
 import os
 
-def _calculate_and_save_summary(results_list, output_dir, filename_prefix, title_prefix, objective_mode):
+def _calculate_and_save_summary(results_list, output_dir, summary_filename, title_prefix, objective_mode):
     """
     共通の計算ロジックを使用して、サマリーファイルを作成し、平均値を追加する。
+    
+    Args:
+        ...
+        summary_filename (str): 保存するサマリーファイル名 (例: "MyRun_summary.txt")
+        ...
     """
-    # サマリーファイルのフルパスを構築
-    filepath = os.path.join(output_dir, f"_{filename_prefix}_summary.txt")
+    # サマリーファイルのフルパスを構築 (引数から直接決定)
+    filepath = os.path.join(output_dir, summary_filename)
 
     # ファイルのヘッダー部分を作成
     content = [
@@ -114,7 +119,13 @@ def save_random_run_summary(results_list, output_dir):
         if 'objective_mode' not in r: # random_runnerにはobjective_modeがないため、ここでは仮に'Waste'とする
             r['objective_mode'] = 'Waste' 
         updated_results.append(r)
-    _calculate_and_save_summary(updated_results, output_dir, "random_runs", "Random", "Waste")
+        
+    # 親ディレクトリ名を取得
+    dir_name = os.path.basename(output_dir)
+    # ファイル名を生成 (例: "MyRun_random_a1b2c3d4_summary.txt")
+    summary_filename = f"{dir_name}_summary.txt"
+
+    _calculate_and_save_summary(updated_results, output_dir, summary_filename, "Random", "Waste")
     
     
 
@@ -123,12 +134,17 @@ def save_comparison_summary(results_list, output_dir, objective_mode):
     'file_load' モードで実行された比較シミュレーションの結果概要を、
     単一のサマリーファイルに保存します。
     """
-    _calculate_and_save_summary(results_list, output_dir, "comparison_runs", "Comparison", objective_mode)
+    # 親ディレクトリ名を取得
+    dir_name = os.path.basename(output_dir)
+    # ファイル名を生成
+    summary_filename = f"{dir_name}_summary.txt"
+    
+    _calculate_and_save_summary(results_list, output_dir, summary_filename, "Comparison", objective_mode)
 
 def save_permutation_summary(results_list, output_dir, objective_mode):
     """
     'auto_permutations' モードの結果を分析し、ベストおよびセカンドベストのパターンを
-    詳細なサマリーファイル (_permutation_summary.txt) に保存します。
+    詳細なサマリーファイルに保存します。
     """
     # 1. ソートキーを設定 (Noneでない値のみを対象とし、最小値がベスト)
     successful_runs = [r for r in results_list if r['final_value'] is not None]
@@ -157,7 +173,10 @@ def save_permutation_summary(results_list, output_dir, objective_mode):
         second_best_patterns = [r for r in successful_runs if r['final_value'] == second_min_value]
 
     # 4. レポートコンテンツの構築
-    filepath = os.path.join(output_dir, "_permutation_summary.txt")
+    # 親ディレクトリ名を取得
+    dir_name = os.path.basename(output_dir)
+    # ファイル名を生成 (例: "MyPermutations_a1b2c3d4_summary.txt")
+    filepath = os.path.join(output_dir, f"{dir_name}_summary.txt")
     objective_label = objective_mode.title()
     
     content = [

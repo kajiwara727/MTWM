@@ -6,7 +6,7 @@ RUN_NAME = ""
 # 'auto_permutations': 'auto' で計算された factors の全順列を試し、最適な階層構造を探します。
 # 'random': RANDOM_SETTINGS に基づいてランダムなシナリオを複数回実行します。
 #  FACTOR_EXECUTION_MODEの選択肢に 'file_load' を追加
-FACTOR_EXECUTION_MODE = "random"
+FACTOR_EXECUTION_MODE = "file_load"
 # 最適化の目的を設定します。
 # "waste": 廃棄物量の最小化を目指します。
 # "operations": 混合操作の総回数の最小化を目指します。
@@ -14,7 +14,7 @@ OPTIMIZATION_MODE = "waste"
 
 # Trueに設定すると、最適化完了後に混合ツリーの可視化グラフ (PNG画像) を生成します。
 # Falseに設定すると、グラフ生成をスキップし、処理時間を短縮できます。
-ENABLE_VISUALIZATION = True
+ENABLE_VISUALIZATION = None
 
 # ファイルから Target Configuration を読み込む場合に、そのファイル名を設定します。
 # ランダム実行で生成したファイル名 (例: "manual-check_eb8386bc_1/random_configs.json") を設定すると、そこから最初のパターンを読み込みます。
@@ -25,7 +25,7 @@ CONFIG_LOAD_FILE = "random_configs.json"
 # ソルバーが使用するCPUコア（ワーカー）の最大数を設定します。
 # 共有マシンの場合は、 2 や 4 などの低い値に設定することを推奨します。
 # None に設定すると、Or-Toolsが利用可能な全コアを使用します。
-MAX_CPU_WORKERS = 8
+MAX_CPU_WORKERS = None
 
 # ノード間で共有（中間液を融通）できる液量の最大値を設定します。Noneの場合は無制限です。
 MAX_SHARING_VOLUME = None
@@ -43,25 +43,29 @@ RANDOM_N_TARGETS = 3
 # 生成・実行するランダムシナリオの総数 (例: 100回)
 RANDOM_K_RUNS = 10
 
-# --- 混合比和の生成ルール（以下の優先順位で適用されます） ---
-# 優先度1: 固定シーケンス（RANDOM_N_TARGETSと要素数を一致させる必要あり）
+# --- 混合比和の生成ルール（以下のいずれか1つが使用されます） ---
+# 以下の設定は、`runners/random_runner.py` によって上から順に評価され、
+# 最初に有効な（空でない）設定が1つだけ採用されます。
+
+# オプション1: 固定シーケンス（RANDOM_N_TARGETSと要素数を一致させる必要あり）
 # 18*5' の代わりに {'base_sum': 18, 'multiplier': 5} という辞書形式を使用
-# この例はコメントアウトされているため、優先度2に移る
+# これが空でないリストの場合、この設定が使用されます。
 RANDOM_S_RATIO_SUM_SEQUENCE = [
     # 18,
     # {'base_sum': 18, 'multiplier': 5},
     # 18,
 ]
 
-# 優先度2: 候補リストからのランダム選択
-# sequenceが空の場合にこちらが評価されます。
-# この例もコメントアウトされているため、優先度3に移る
+# オプション2: 候補リストからのランダム選択
+# `RANDOM_S_RATIO_SUM_SEQUENCE` が空のリストの場合、こちらが評価されます。
+# これが空でないリストの場合、ターゲットごとにこのリストからランダムに値が選ばれます。
 RANDOM_S_RATIO_SUM_CANDIDATES = [
     # 18, 24, 30, 36
 ]
 
-# 優先度3: 上記2つが有効でない場合のデフォルト値
-# この設定では、全ターゲットの比率の合計が 18 になる
+# オプション3: デフォルト値
+# 上記の `SEQUENCE` と `CANDIDATES` が両方とも空のリストの場合、
+# このデフォルト値が全てのターゲットで使用されます。
 RANDOM_S_RATIO_SUM_DEFAULT = 12
 
 # --- 'auto' / 'auto_permutations' モード用設定 ---
