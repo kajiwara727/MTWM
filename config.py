@@ -14,8 +14,7 @@ OPTIMIZATION_MODE = "waste"
 
 # Trueに設定すると、最適化完了後に混合ツリーの可視化グラフ (PNG画像) を生成します。
 # Falseに設定すると、グラフ生成をスキップし、処理時間を短縮できます。
-ENABLE_VISUALIZATION = None
-
+ENABLE_VISUALIZATION = False
 # ファイルから Target Configuration を読み込む場合に、そのファイル名を設定します。
 # ランダム実行で生成したファイル名 (例: "manual-check_eb8386bc_1/random_configs.json") を設定すると、そこから最初のパターンを読み込みます。
 CONFIG_LOAD_FILE = "random_configs.json"
@@ -39,9 +38,9 @@ MAX_MIXER_SIZE = 5
 # ランダムシナリオにおける試薬の種類数 (例: 3種類)
 RANDOM_T_REAGENTS = 3
 # ランダムシナリオにおけるターゲット（目標混合液）の数 (例: 3ターゲット)
-RANDOM_N_TARGETS = 3
+RANDOM_N_TARGETS = 5
 # 生成・実行するランダムシナリオの総数 (例: 100回)
-RANDOM_K_RUNS = 10
+RANDOM_K_RUNS = 50
 
 # --- 混合比和の生成ルール（以下のいずれか1つが使用されます） ---
 # 以下の設定は、`runners/random_runner.py` によって上から順に評価され、
@@ -51,9 +50,7 @@ RANDOM_K_RUNS = 10
 # 18*5' の代わりに {'base_sum': 18, 'multiplier': 5} という辞書形式を使用
 # これが空でないリストの場合、この設定が使用されます。
 RANDOM_S_RATIO_SUM_SEQUENCE = [
-    # 18,
-    # {'base_sum': 18, 'multiplier': 5},
-    # 18,
+    18, 32, 50
 ]
 
 # オプション2: 候補リストからのランダム選択
