@@ -1,4 +1,3 @@
-# or_tools_solver.py (最終修正版)
 import time
 from ortools.sat.python import cp_model
 from reporting.reporter import SolutionReporter
@@ -8,9 +7,9 @@ import sys
 # 再帰制限の引き上げ（必要に応じて）
 sys.setrecursionlimit(2000)
 
-# R * W * C 項の最大値。変数の最大値 (900) * 定数 (例: 5) でも 4500 程度。
-# 安全性を考慮して大きめの値を設定します。
+# R * W * C 項の最大値。変数の最大値 (p_node, f_value) から安全マージンをとる。
 MAX_PRODUCT_BOUND = 50000 
+
 
 # --- Or-Toolsへのデータアクセスアダプタ ---
 class OrToolsModelAdapter:
@@ -34,7 +33,14 @@ class OrToolsModelAdapter:
         # 2. それ以外の変数の評価（Mapから検索）
         if var_name in self.variable_map:
             or_tools_var = self.variable_map[var_name]
-            return self._get_value_wrapper(self.solver.Value(or_tools_var))
+            # solver.Value() はコールバック内でのみ呼び出されるべきだが、
+            # OrToolsModelAdapter は最終的な解の分析 (Reporter) で使われるため、
+            # ここでは solver インスタンスが保持している値を取得する
+            if isinstance(self.solver, cp_model.CpSolver):
+                return self._get_value_wrapper(self.solver.Value(or_tools_var))
+            else:
+                # コールバックから渡された solver (SolutionCallback自体) の場合
+                return self._get_value_wrapper(self.solver.Value(or_tools_var))
 
         # デバッグ用：見つからない変数名を警告
         # print(f"Warning: Could not find variable name in OrToolsModelAdapter map: {var_name}")
@@ -54,6 +60,43 @@ class OrToolsModelAdapter:
         # SolutionReporterの互換性のために、evalメソッドを持つ自身を返す
         return self
         
+
+# --- ソリューションコールバック ---
+class SolutionCallback(cp_model.CpSolverSolutionCallback):
+    """
+    暫定解が見つかるたびに呼び出されるコールバッククラス。
+    z3_solver.py のように、より良い解が見つかるたびに進捗を出力します。
+    """
+    def __init__(self, problem, variable_map, objective_var, objective_mode):
+        cp_model.CpSolverSolutionCallback.__init__(self)
+        self.problem = problem
+        self.variable_map = variable_map
+        self.objective_var = objective_var
+        self.objective_mode = objective_mode
+        
+        self.best_model = None
+        self.best_value = float('inf')
+        self.best_analysis = None
+        self.start_time = time.time()
+
+    def OnSolutionCallback(self):
+        """暫定解が見つかったときに実行されるメソッド"""
+        current_value = self.Value(self.objective_var)
+        
+        if current_value < self.best_value:
+            elapsed = time.time() - self.start_time
+            print(f"Found a new, better solution with {self.objective_mode}: {int(current_value)} (Time: {elapsed:.2f}s)")
+            
+            self.best_value = current_value
+            
+            # SolutionReporter互換のアダプタを生成 (self=コールバック自身がsolverの役割)
+            self.best_model = OrToolsModelAdapter(self, self.variable_map, current_value)
+            
+            # この暫定解を分析
+            reporter = SolutionReporter(self.problem, self.best_model, self.objective_mode)
+            self.best_analysis = reporter.analyze_solution()
+
+# --- メインクラス ---
 class OrToolsSolver:
     """
     Or-Tools CP-SATソルバーと対話し、最適化問題の制約を設定し、解を求めるクラス。
@@ -68,47 +111,70 @@ class OrToolsSolver:
             self.solver.parameters.num_search_workers = max_workers
             print(f"Solver set to use a maximum of {max_workers} CPU workers.")
         
+        # --- テクニック適用 ---
+        # 探索の進捗ログを有効にする
+        self.solver.parameters.log_search_progress = True
+        
         # 変数名（文字列）と Or-Tools 変数オブジェクトのマッピング
         self.variable_map = {}
         
         self._set_variables_and_constraints()
 
-    # def solve(self, checkpoint_handler): # <--- 修正前
-    def solve(self): # <--- 修正後
+    def solve(self):
         """最適化問題を解くメインのメソッド（Or-Tools CP-SAT版）。"""
         
-
         start_time = time.time()
         
         print(f"\n--- Solving the optimization problem (mode: {self.objective_mode.upper()}) with Or-Tools CP-SAT ---")
+        
+        # --- テクニック適用 ---
+        # 1. モデルの妥当性確認
+        try:
+            validation = self.model.Validate()
+            if validation:
+                print(f"Model validation warning: {validation}")
+        except Exception as e:
+            print(f"Model validation failed: {e}")
+            return None, None, None, 0
 
-        # ソルバーの実行
-        status = self.solver.Solve(self.model)
+        # --- テクニック適用 ---
+        # 2. ソリューションコールバックの準備
+        solution_callback = SolutionCallback(
+            self.problem, 
+            self.variable_map, 
+            self.objective_variable, 
+            self.objective_mode
+        )
+
+        # ソルバーの実行 (コールバックを渡す)
+        status = self.solver.Solve(self.model, solution_callback)
         elapsed_time = time.time() - start_time
         
-        best_model = None
-        best_value = None
-        best_analysis = None
+        # コールバックから最良の結果を取得
+        best_model = solution_callback.best_model
+        best_value = solution_callback.best_value if solution_callback.best_value != float('inf') else None
+        best_analysis = solution_callback.best_analysis
         
-        # Or-ToolsのSolve()は、最適解が見つかった場合に cp_model.OPTIMAL を返す
+        # 最終ステータスの確認
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-            best_value = self.solver.ObjectiveValue()
-            print(f"Or-Tools found an optimal solution with {self.objective_mode}: {int(best_value)}")
-
-            # SolutionReporter互換のためのアダプタを生成
-            best_model = OrToolsModelAdapter(self.solver, self.variable_map, best_value)
-            
-            # SolutionReporterによる分析
-            reporter = SolutionReporter(self.problem, best_model, self.objective_mode)
-            best_analysis = reporter.analyze_solution()
-            
-
+            final_objective_value = self.solver.ObjectiveValue()
+            # コールバックが最後に補足した値と最終的な値が一致するか確認
+            if best_value is None or abs(final_objective_value - best_value) > 1e-6:
+                # 最終的な解がコールバックで取得した解より優れていた場合
+                print(f"Or-Tools found final solution ({self.solver.StatusName(status)}) with {self.objective_mode}: {int(final_objective_value)}")
+                best_value = final_objective_value
+                
+                # 最終的な解のアダプタと分析結果を生成
+                best_model = OrToolsModelAdapter(self.solver, self.variable_map, best_value)
+                reporter = SolutionReporter(self.problem, best_model, self.objective_mode)
+                best_analysis = reporter.analyze_solution()
+            else:
+                 print(f"Or-Tools final status: {self.solver.StatusName(status)}. Best solution {int(best_value)} confirmed.")
+        
+        elif status == cp_model.INFEASIBLE:
+            print("No feasible solution found.")
         else:
             print(f"Or-Tools Solver status: {self.solver.StatusName(status)}")
-            
-            if status == cp_model.INFEASIBLE:
-                print("No feasible solution found.")
-
 
         print("--- Or-Tools Solver Finished ---")
         return best_model, best_value, best_analysis, elapsed_time
@@ -136,37 +202,57 @@ class OrToolsSolver:
         self._set_ratio_sum_constraints()
         self._set_leaf_node_constraints()
         self._set_mixer_capacity_constraints()
-        self._set_range_constraints()
         self._set_activity_constraints()
+        self._set_symmetry_breaking_constraints() # <- テクニック適用
         self.objective_variable = self._set_objective_function()
         
     def _define_or_tools_variables(self):
-        """MTWMProblemの構造（変数名）に基づき、Or-Toolsの変数を定義する。"""
-        MAX_BOUND = 900 # 経験的な最大値
-        
+        """
+        *** テクニック適用: 変数上限の厳密化 ***
+        MTWMProblemの構造（変数名）に基づき、Or-Toolsの変数を定義する。
+        """
         for m, tree in enumerate(self.problem.forest):
             for l, nodes in tree.items():
                 for k, node_def in enumerate(nodes):
                     
-                    # 比率変数
+                    # このノードの P値 と F値 を取得
+                    p_node = self.problem.p_values[m][(l, k)]
+                    f_value = self.problem.targets_config[m]['factors'][l]
+
+                    # 比率変数 (上限: p_node)
                     for var_name in node_def['ratio_vars']:
-                        self._add_var(var_name, 0, MAX_BOUND)
-                    # 試薬変数
+                        self._add_var(var_name, 0, p_node)
+                        
+                    # 試薬変数 (上限: f_value - 1)
+                    # (dfmm.pyのfind_factors_for_sumは2以上の因数を使うため、f_value-1 は 1 以上)
+                    reagent_max = max(0, f_value - 1)
                     for var_name in node_def['reagent_vars']:
-                        self._add_var(var_name, 0, MAX_BOUND)
+                        self._add_var(var_name, 0, reagent_max)
                         
-                    # 共有変数
-                    max_sharing_vol = min(MAX_BOUND, MAX_SHARING_VOLUME or MAX_BOUND)
+                    # 共有変数 (上限: f_value または MAX_SHARING_VOLUME)
+                    # 共有液の最大量は、ノードの容量(f_value)と設定の上限の小さい方
+                    sharing_max = f_value
+                    if MAX_SHARING_VOLUME is not None:
+                         sharing_max = min(f_value, MAX_SHARING_VOLUME)
+                         
                     for var_name in node_def.get('intra_sharing_vars', {}).values():
-                         self._add_var(var_name, 0, max_sharing_vol)
+                         self._add_var(var_name, 0, sharing_max)
                     for var_name in node_def.get('inter_sharing_vars', {}).values():
-                         self._add_var(var_name, 0, max_sharing_vol)
+                         self._add_var(var_name, 0, sharing_max)
                         
-                    # ヘルパー変数 (総入力、活動状態、廃棄物量)
-                    self._add_var(node_def['total_input_var_name'], 0, MAX_BOUND)
-                    self._add_var(f"IsActive_m{m}_l{l}_k{k}", 0, 1) # BoolVar
+                    # ヘルパー変数
+                    # 総入力 (上限: f_value)
+                    self._add_var(node_def['total_input_var_name'], 0, f_value)
+                    # 活動状態 (Bool)
+                    self._add_var(f"IsActive_m{m}_l{l}_k{k}", 0, 1) 
+                    
                     if node_def['waste_var_name']:
-                        self._add_var(node_def['waste_var_name'], 0, MAX_BOUND)
+                        # 廃棄物量 (上限: f_value)
+                        self._add_var(node_def['waste_var_name'], 0, f_value)
+                    
+                    # IsUsed 変数 (ルートノード以外)
+                    if l > 0:
+                        self._add_var(f"IsUsed_m{m}_l{l}_k{k}", 0, 1) # BoolVar
 
 
     def _get_input_vars(self, node_def):
@@ -272,6 +358,7 @@ class OrToolsSolver:
                     self.model.Add(ratio_var == reagent_var)
 
     def _set_mixer_capacity_constraints(self):
+        """ *** Big-M法 *非* 適用 (論理制約) *** """
         for m, l, k, node_def in self._iterate_all_nodes():
             f_value = self.problem.targets_config[m]['factors'][l]
             total_sum_var = self._get_var(node_def['total_input_var_name'])
@@ -283,31 +370,56 @@ class OrToolsSolver:
 
             if l == 0: 
                 self.model.Add(total_sum_var == f_value)
+                self.model.Add(is_active_var == 1) # 念のため
             else: 
+                # アクティブなら f_value、非アクティブなら 0
                 self.model.Add(total_sum_var == f_value).OnlyEnforceIf(is_active_var)
                 self.model.Add(total_sum_var == 0).OnlyEnforceIf(is_active_var.Not())
-
-    def _set_range_constraints(self):
-        for m, l, k, node_def in self._iterate_all_nodes():
-            upper_bound = self.problem.targets_config[m]['factors'][l] - 1
-            
-            for var_name in node_def.get('reagent_vars', []):
-                self.model.Add(self._get_var(var_name) <= upper_bound)
-            
-            # 共有変数の上限は _define_or_tools_variables で設定済み
-
+                
     def _set_activity_constraints(self):
         for m_src, l_src, k_src, node_def in self._iterate_all_nodes():
             if l_src == 0: continue 
             
             total_used_vars = self._get_outgoing_vars(m_src, l_src, k_src)
+            # 総使用量を表す中間変数
+            f_src = self.problem.targets_config[m_src]['factors'][l_src]
+            total_used_sum_var = self.model.NewIntVar(0, f_src, f"TotalUsed_m{m_src}_l{l_src}_k{k_src}")
+            self.model.Add(total_used_sum_var == sum(total_used_vars))
+            
             is_active_var = self._get_var(f"IsActive_m{m_src}_l{l_src}_k{k_src}")
+            # IsUsed 変数を取得 (define_variables で追加済み)
+            is_used_var = self._get_var(f"IsUsed_m{m_src}_l{l_src}_k{k_src}")
             
-            is_used_var = self._add_var(f"IsUsed_m{m_src}_l{l_src}_k{k_src}", 0, 1)
-            self.model.Add(sum(total_used_vars) >= 1).OnlyEnforceIf(is_used_var)
-            self.model.Add(sum(total_used_vars) == 0).OnlyEnforceIf(is_used_var.Not())
+            # is_used_var <=> (total_used_sum_var >= 1)
+            self.model.Add(total_used_sum_var >= 1).OnlyEnforceIf(is_used_var)
+            self.model.Add(total_used_sum_var == 0).OnlyEnforceIf(is_used_var.Not())
             
+            # is_active_var => is_used_var
             self.model.AddImplication(is_active_var, is_used_var)
+
+    def _set_symmetry_breaking_constraints(self):
+        """
+        *** テクニック適用: 対称性の破壊 ***
+        同じターゲットの同じレベルにあるノード間で、
+        総入力（または活動状態）に順序付けを行う。
+        (z3_solver.py の _set_symmetry_breaking_constraints と同義)
+        """
+        for m, tree in enumerate(self.problem.forest):
+            for l, nodes in tree.items():
+                if len(nodes) > 1:
+                    # このレベルにあるノードのリスト (ノード定義)
+                    # node_defs = self.problem.forest[m][l] # <- これは辞書ではなくリスト
+                    node_defs = [self.problem.forest[m][l][k] for k in range(len(nodes))]
+                    
+                    for k in range(len(node_defs) - 1):
+                        # k番目のノードの総入力変数
+                        total_input_k = self._get_var(node_defs[k]['total_input_var_name'])
+                        # k+1番目のノードの総入力変数
+                        total_input_k1 = self._get_var(node_defs[k+1]['total_input_var_name'])
+                        
+                        # total_input_k >= total_input_k1 という制約を追加
+                        self.model.Add(total_input_k >= total_input_k1)
+
 
     def _set_objective_function(self):
         all_waste_vars = []
@@ -333,7 +445,7 @@ class OrToolsSolver:
             return total_waste
         elif self.objective_mode == 'operations':
             self.model.Minimize(total_operations)
-            self.variable_map["objective_variable"] = total_operations # アダプタ用
+            self.variable_map["objective_variable"] = total_operations # アдаプタ用
             return total_operations
         else:
             raise ValueError(f"Unknown optimization mode: '{self.objective_mode}'. Must be 'waste' or 'operations'.")
