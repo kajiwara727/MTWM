@@ -17,6 +17,8 @@ class Config:
     # --- 新しい設定の追加 ---
     ENABLE_VISUALIZATION = config.ENABLE_VISUALIZATION
     MAX_CPU_WORKERS = config.MAX_CPU_WORKERS
+    MAX_TIME_PER_RUN_SECONDS = config.MAX_TIME_PER_RUN_SECONDS
+    ABSOLUTE_GAP_LIMIT = config.ABSOLUTE_GAP_LIMIT
     
     # --- 制約条件 ---
     MAX_SHARING_VOLUME = config.MAX_SHARING_VOLUME

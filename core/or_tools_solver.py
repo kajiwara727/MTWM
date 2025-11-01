@@ -1,7 +1,7 @@
 import time
 from ortools.sat.python import cp_model
 from reporting.reporter import SolutionReporter
-from config import MAX_SHARING_VOLUME, MAX_MIXER_SIZE, MAX_LEVEL_DIFF
+from utils.config_loader import Config
 import sys
 
 # 再帰制限の引き上げ（必要に応じて）
@@ -107,10 +107,22 @@ class OrToolsSolver:
         self.model = cp_model.CpModel()
         self.solver = cp_model.CpSolver()
 
-        if max_workers is not None and isinstance(max_workers, int) and max_workers > 0:
-            self.solver.parameters.num_search_workers = max_workers
-            print(f"Solver set to use a maximum of {max_workers} CPU workers.")
+        if Config.MAX_CPU_WORKERS is not None and Config.MAX_CPU_WORKERS > 0:
+            self.solver.parameters.num_search_workers = Config.MAX_CPU_WORKERS
+            print(f"Solver set to use a maximum of {Config.MAX_CPU_WORKERS} CPU workers.")
         
+        # 全体の最大時間制限
+        max_time = Config.MAX_TIME_PER_RUN_SECONDS
+        if max_time is not None and max_time > 0:
+            print(f"--- Setting max time per run to {max_time} seconds ---")
+            self.solver.parameters.max_time_in_seconds = float(max_time)
+
+        # 絶対ギャップによる停止設定
+        gap_limit = Config.ABSOLUTE_GAP_LIMIT
+        if gap_limit is not None and gap_limit > 0:
+            print(f"--- Setting absolute gap limit to {gap_limit} ---")
+            self.solver.parameters.absolute_gap_limit = float(gap_limit)
+
         # --- テクニック適用 ---
         # 探索の進捗ログを有効にする
         self.solver.parameters.log_search_progress = True
@@ -232,8 +244,8 @@ class OrToolsSolver:
                     # 共有変数 (上限: f_value または MAX_SHARING_VOLUME)
                     # 共有液の最大量は、ノードの容量(f_value)と設定の上限の小さい方
                     sharing_max = f_value
-                    if MAX_SHARING_VOLUME is not None:
-                         sharing_max = min(f_value, MAX_SHARING_VOLUME)
+                    if Config.MAX_SHARING_VOLUME is not None:
+                         sharing_max = min(f_value, Config.MAX_SHARING_VOLUME)
                          
                     for var_name in node_def.get('intra_sharing_vars', {}).values():
                          self._add_var(var_name, 0, sharing_max)
