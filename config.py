@@ -1,5 +1,5 @@
 # 実行名を定義します。出力ディレクトリの名前の一部として使用されます。
-RUN_NAME = "Test"
+RUN_NAME = ""
 # 混合ツリーの階層構造（factors）を決定するモードを選択します。
 # 'manual': TARGETS_FOR_MANUAL_MODE で定義された factors を手動で設定します。
 # 'auto': 各ターゲットの ratios の合計値から factors を自動計算します。
@@ -49,10 +49,10 @@ MAX_MIXER_SIZE = 5
 
 # --- 'random' モード用設定 ---
 # FACTOR_EXECUTION_MODE が 'random' の場合にのみ使用されます。
-# ランダムシナリオにおける試薬の種類数 (例: 3種類)
-RANDOM_T_REAGENTS = 3
 # ランダムシナリオにおけるターゲット（目標混合液）の数 (例: 3ターゲット)
 RANDOM_N_TARGETS = 4
+# ランダムシナリオにおける試薬の種類数 (例: 3種類)
+RANDOM_T_REAGENTS = 3
 # 生成・実行するランダムシナリオの総数 (例: 100回)
 RANDOM_K_RUNS = 10
 
@@ -78,8 +78,6 @@ RANDOM_S_RATIO_SUM_SEQUENCE = [
 RANDOM_S_RATIO_SUM_CANDIDATES = [
     # 18, 24, 30, 36
 ]
-
-
 
 # --- 'auto' / 'auto_permutations' モード用設定 ---
 # FACTOR_EXECUTION_MODE が 'auto' または 'auto_permutations' の場合に使用されます。
