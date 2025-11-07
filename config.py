@@ -1,5 +1,5 @@
 # 実行名を定義します。出力ディレクトリの名前の一部として使用されます。
-RUN_NAME = ""
+RUN_NAME = "Test"
 # 混合ツリーの階層構造（factors）を決定するモードを選択します。
 # 'manual': TARGETS_FOR_MANUAL_MODE で定義された factors を手動で設定します。
 # 'auto': 各ターゲットの ratios の合計値から factors を自動計算します。
@@ -52,9 +52,14 @@ MAX_MIXER_SIZE = 5
 # ランダムシナリオにおける試薬の種類数 (例: 3種類)
 RANDOM_T_REAGENTS = 3
 # ランダムシナリオにおけるターゲット（目標混合液）の数 (例: 3ターゲット)
-RANDOM_N_TARGETS = 5
+RANDOM_N_TARGETS = 4
 # 生成・実行するランダムシナリオの総数 (例: 100回)
-RANDOM_K_RUNS = 50
+RANDOM_K_RUNS = 10
+
+# オプション: デフォルト値
+# 上記の `SEQUENCE` と `CANDIDATES` が両方とも空のリストの場合、
+# このデフォルト値が全てのターゲットで使用されます。
+RANDOM_S_RATIO_SUM_DEFAULT = 18
 
 # --- 混合比和の生成ルール（以下のいずれか1つが使用されます） ---
 # 以下の設定は、`runners/random_runner.py` によって上から順に評価され、
@@ -64,7 +69,7 @@ RANDOM_K_RUNS = 50
 # 18*5' の代わりに {'base_sum': 18, 'multiplier': 5} という辞書形式を使用
 # これが空でないリストの場合、この設定が使用されます。
 RANDOM_S_RATIO_SUM_SEQUENCE = [
-    18, 32, 50
+    # 18, 32, 50
 ]
 
 # オプション2: 候補リストからのランダム選択
@@ -74,22 +79,54 @@ RANDOM_S_RATIO_SUM_CANDIDATES = [
     # 18, 24, 30, 36
 ]
 
-# オプション3: デフォルト値
-# 上記の `SEQUENCE` と `CANDIDATES` が両方とも空のリストの場合、
-# このデフォルト値が全てのターゲットで使用されます。
-RANDOM_S_RATIO_SUM_DEFAULT = 12
+
 
 # --- 'auto' / 'auto_permutations' モード用設定 ---
 # FACTOR_EXECUTION_MODE が 'auto' または 'auto_permutations' の場合に使用されます。
 # 'factors' を指定する必要はありません。自動で計算されます。
 TARGETS_FOR_AUTO_MODE = [
-    {'name': 'Target 1', 'ratios': [2,15,1]},
-    # {'name': 'Target 1', 'ratios': [65, 10, 15]},
-    # {'name': 'Target 1', 'ratios': [12,3,10]},
-    # {'name': 'Target 1', 'ratios': [1,8,9]},
-    # {'name': 'Target 1', 'ratios': [14, 10, 1]},
-    # {'name': 'Target 2', 'ratios': [7, 8, 10]},
-    # {'name': 'Target 3', 'ratios': [5, 12, 8]},
+    # {'name': 'Target 1', 'ratios': [7,7,1,3]},
+    # {'name': 'Target 2', 'ratios': [1,1,2,14]},
+    # {'name': 'Target 3', 'ratios': [5,1,9,3]},
+    # {'name': 'Target 4', 'ratios': [5,3,9,1]},
+
+    # Simple
+    {'name': 'Target 1', 'ratios': [2,11,5]},
+    {'name': 'Target 2', 'ratios': [12,5,1]},
+    {'name': 'Target 3', 'ratios': [5,6,14]}
+
+    # すべて12:12:1の場合
+    # {'name': 'Target 1', 'ratios': [12,12,1]},
+    # {'name': 'Target 2', 'ratios': [12,12,1]},
+    # {'name': 'Target 3', 'ratios': [12,12,1]}
+
+    # すべて97:97:6の場合
+    # {'name': 'Target 1', 'ratios': [97,97,6]},
+    # {'name': 'Target 2', 'ratios': [97,97,6]},
+    # {'name': 'Target 3', 'ratios': [97,97,6]}
+
+     # すべて49:49:2の場合
+    # {'name': 'Target 1', 'ratios': [49,49,2]},
+    # {'name': 'Target 2', 'ratios': [49,49,2]},
+    # {'name': 'Target 3', 'ratios': [49,49,2]}
+
+    # 49:98:147
+    # {'name': 'Target 1', 'ratios': [26,10,13]},
+    # {'name': 'Target 2', 'ratios': [53,20,25]},
+    # {'name': 'Target 3', 'ratios': [79,30,38]},
+
+    # 49:98:147_Second
+    # {'name': 'Target 1', 'ratios': [23,13,13]},
+    # {'name': 'Target 2', 'ratios': [46,27,25]},
+    # {'name': 'Target 3', 'ratios': [69,40,38]},
+
+    # 49:98:147_Third
+    # {'name': 'Target 1', 'ratios': [19,17,13]},
+    # {'name': 'Target 2', 'ratios': [40,33,25]},
+    # {'name': 'Target 3', 'ratios': [59,50,38]},
+
+
+
     # {'name': 'Target 1', 'ratios': [2, 11, 5]},
     # {'name': 'Target 2', 'ratios': [12, 5, 1]},
     # {'name': 'Target 3', 'ratios': [5, 6, 14]},
