@@ -2,280 +2,195 @@
 import os
 import networkx as nx
 import matplotlib.pyplot as plt
-# import z3 <--- Z3インポートを削除
 import matplotlib.colors as mcolors
+from utils import create_dfmm_node_name, parse_sharing_key
 
 class SolutionVisualizer:
     """
-    最適化された混合手順（ソルバーの解）を、networkxとmatplotlibを用いて
-    有向グラフとして可視化し、画像ファイルとして保存するクラス。
+    ソルバーの解（OrToolsSolutionModel）を読み取り、networkxでグラフを構築し、
+    matplotlibで可視化（PNG画像として保存）するクラス。
     """
-
-    # ... (STYLE_CONFIG と LAYOUT_CONFIG は変更なし) ...
     STYLE_CONFIG = {
-        'mix_node': {'color': '#87CEEB', 'size': 2000},       # 中間生成物ノード
-        'target_node': {'color': '#90EE90', 'size': 2000},    # 最終ターゲットノード
-        'reagent_node': {'color': '#FFDAB9', 'size': 1500},   # 試薬ノード
-        'waste_node': {'color': 'black', 'size': 300, 'shape': 'o'}, # 廃棄物ノード
-        'default_node': {'color': 'gray', 'size': 1000},
-        'edge': {'width': 1.5, 'arrowsize': 20, 'connectionstyle': 'arc3,rad=0.1'}, # 矢印（エッジ）
-        'font': {'font_size': 10, 'font_weight': 'bold', 'font_color': 'black'}, # ラベルフォント
-        'edge_label_bbox': dict(facecolor='white', edgecolor='none', alpha=0.7, pad=1), # エッジラベルの背景
-        'edge_colormap': 'viridis', # エッジの重み付けに使用するカラーマップ
+        "mix_node": {"color": "#87CEEB", "size": 2000},
+        "target_node": {"color": "#90EE90", "size": 2000},
+        "mix_peer_node": {"color": "#FFB6C1", "size": 1800},
+        "reagent_node": {"color": "#FFDAB9", "size": 1500},
+        "waste_node": {"color": "black", "size": 300, "shape": "o"},
+        "default_node": {"color": "gray", "size": 1000},
+        "edge": {"width": 1.5, "arrowsize": 20, "connectionstyle": "arc3,rad=0.1"},
+        "font": {"font_size": 10, "font_weight": "bold", "font_color": "black"},
+        "edge_label_bbox": dict(facecolor="white", edgecolor="none", alpha=0.7, pad=1),
+        "edge_colormap": "viridis",
     }
     LAYOUT_CONFIG = {
-        'x_gap': 6.0, 'y_gap': 5.0, 'tree_gap': 10.0, # ノード間・ツリー間のギャップ
-        'waste_node_offset_x': 3.5, 'waste_node_stagger_y': 0.8, # 廃棄ノードのオフセット
+        "x_gap": 6.0, "y_gap": 5.0, "tree_gap": 10.0,
+        "waste_node_offset_x": 3.5, "waste_node_stagger_y": 0.8,
     }
 
-
     def __init__(self, problem, model):
-        """
-        コンストラクタ。
-
-        Args:
-            problem (MTWMProblem): 最適化問題の定義オブジェクト。
-            model (OrToolsModelAdapter): ソルバーの解にアクセスするためのアダプタ。
-        """
         self.problem = problem
         self.model = model
 
     def visualize_solution(self, output_dir):
-        """
-        混合ツリーのグラフを構築し、画像として保存するメインメソッド。
-        """
-        # モデルからグラフデータを構築
         graph, edge_volumes = self._build_graph_from_model()
         if not graph.nodes():
             print("No active nodes to visualize.")
             return
-
-        # ノードの配置座標を計算
         positions = self._calculate_node_positions(graph)
-        # グラフを描画して保存
         self._draw_graph(graph, positions, edge_volumes, output_dir)
 
     def _build_graph_from_model(self):
-        """
-        ソルバーのモデルを解析し、networkx用のグラフデータ（ノードとエッジ）を構築します。
-        """
         G = nx.DiGraph()
-        edge_volumes = {} # エッジに表示する液量を保存する辞書
+        edge_volumes = {}
+        
+        # 1. Active DFMM nodes
+        for target_idx, tree_vars in enumerate(self.model.forest_vars):
+            for level, node_vars_list in tree_vars.items():
+                for node_idx, node_vars in enumerate(node_vars_list):
+                    
+                    total_input = self.model._v(node_vars["total_input_var"])
+                    if total_input <= 0: continue
+                    
+                    node_name = create_dfmm_node_name(target_idx, level, node_idx)
+                    ratio_vals = [self.model._v(r) for r in node_vars["ratio_vars"]]
+                    label = f"R{target_idx+1}:[{':'.join(map(str, ratio_vals))}]" if level == 0 else ":".join(map(str, ratio_vals))
+                    
+                    G.add_node(node_name, label=label, level=level, target=target_idx, type="mix")
+                    self._add_waste_node(G, node_vars, node_name)
+                    self._add_reagent_edges(G, edge_volumes, node_vars, node_name, level, target_idx)
+                    self._add_sharing_edges(G, edge_volumes, node_vars, node_name, target_idx)
 
-        # アクティブな（実際に使われている）ノードのみを処理
-        for m, l, k, node_def, total_input in self._iterate_active_nodes():
-            node_name = node_def['node_name'] # f"v_m{m}_l{l}_k{k}"
-            ratio_vals = [self.model.eval(r_name).as_long() for r_name in node_def['ratio_vars']]
-            # ノードに表示するラベルを生成 (ルートノードは特別扱い)
-            label = f"R{m+1}:[{':'.join(map(str, ratio_vals))}]" if l == 0 else ':'.join(map(str, ratio_vals))
-
-            # グラフにノードを追加。描画に必要な情報を属性として持たせる
-            G.add_node(node_name, label=label, level=l, target=m, type='mix')
-
-            # 廃棄、試薬、共有の各要素をグラフに追加
-            self._add_waste_node(G, node_def, node_name)
-            self._add_reagent_edges(G, edge_volumes, node_def, node_name, l, m)
-            self._add_sharing_edges(G, edge_volumes, node_def, node_name, m)
+        # 2. Peer nodes (MTWMでは現状空だが、拡張性のため維持)
+        for i, peer_vars in enumerate(self.model.peer_vars):
+            if self.model._v(peer_vars["total_input_var"]) <= 0: continue
+            
+            node_name = peer_vars["name"]
+            ratio_vals = [self.model._v(r) for r in peer_vars["ratio_vars"]]
+            src_a = self.problem.peer_nodes[i]["source_a_id"]
+            level = (src_a[1] + self.problem.peer_nodes[i]["source_b_id"][1]) / 2.0 - 0.5
+            
+            G.add_node(node_name, label=f"R-Mix\n[{':'.join(map(str, ratio_vals))}]", level=level, target=src_a[0], type="mix_peer")
+            self._add_waste_node(G, peer_vars, node_name)
+            
+            for key in ["from_a", "from_b"]:
+                if (val := self.model._v(peer_vars["input_vars"][key])) > 0:
+                    src_id = self.problem.peer_nodes[i]["source_a_id" if key == "from_a" else "source_b_id"]
+                    src_name = create_dfmm_node_name(*src_id)
+                    G.add_edge(src_name, node_name, volume=val)
+                    edge_volumes[(src_name, node_name)] = val
 
         return G, edge_volumes
 
-    def _iterate_active_nodes(self):
-        """モデルで実際に使用されている（総入力が0より大きい）ノードのみを巡回するジェネレータ。"""
-        for m, tree in enumerate(self.problem.forest):
-            for l, nodes in tree.items():
-                for k, node_def in enumerate(nodes):
-                    # inputs = (node.get('reagent_vars', []) + ...) <--- 変数名のリストを取得
-                    # total_input = self.model.eval(z3.Sum(inputs)).as_long() <--- z3.Sum を削除
-                    
-                    # OrToolsSolverで計算済みの総入力変数の名前を取得して評価
-                    total_input_var_name = node_def['total_input_var_name']
-                    total_input = self.model.eval(total_input_var_name).as_long()
-                    
-                    if total_input > 0:
-                        yield m, l, k, node_def, total_input
+    def _add_waste_node(self, G, node_vars, parent):
+        # [MODIFIED] waste_var が存在する場合のみ値を取得
+        waste_var = node_vars.get("waste_var")
+        if waste_var is not None and (waste := self.model._v(waste_var)) > 0:
+            wn = f"waste_{parent}"
+            G.add_node(wn, level=G.nodes[parent]["level"], target=G.nodes[parent]["target"], type="waste")
+            G.add_edge(parent, wn, style="invisible")
 
-    def _add_waste_node(self, G, node_def, parent_name):
-        """ノードに廃棄物があれば、グラフに廃棄ノード（黒点）と非表示エッジを追加する。"""
-        waste_var_name = node_def.get('waste_var_name')
-        if waste_var_name is not None and self.model.eval(waste_var_name).as_long() > 0:
-            waste_node_name = f"waste_{parent_name}"
-            G.add_node(waste_node_name, level=G.nodes[parent_name]['level'], target=G.nodes[parent_name]['target'], type='waste')
-            # 廃棄ノードを親の右に配置するための非表示エッジ
-            G.add_edge(parent_name, waste_node_name, style='invisible')
+    def _add_reagent_edges(self, G, edge_volumes, node_vars, dest, level, target):
+        for r_idx, r_var in enumerate(node_vars.get("reagent_vars", [])):
+            if (val := self.model._v(r_var)) > 0:
+                rn = f"Reagent_{dest}_t{r_idx}"
+                G.add_node(rn, label=chr(0x2460 + r_idx), level=level+1, target=target, type="reagent")
+                G.add_edge(rn, dest, volume=val)
+                edge_volumes[(rn, dest)] = val
 
-    def _add_reagent_edges(self, G, edge_volumes, node_def, dest_name, level, target_idx):
-        """試薬から混合ノードへのエッジ（矢印）を追加する。"""
-        for r_idx, r_var_name in enumerate(node_def.get('reagent_vars', [])):
-            if (r_val := self.model.eval(r_var_name).as_long()) > 0:
-                reagent_name = f"Reagent_{dest_name}_t{r_idx}"
-                # 試薬ノードを追加（①, ②, ...）
-                G.add_node(reagent_name, label=chr(0x2460 + r_idx), level=level + 1, target=target_idx, type='reagent')
-                G.add_edge(reagent_name, dest_name, volume=r_val)
-                edge_volumes[(reagent_name, dest_name)] = r_val
+    def _add_sharing_edges(self, G, edge_volumes, node_vars, dest, target):
+        all_sharing = {**node_vars.get("intra_sharing_vars", {}), **node_vars.get("inter_sharing_vars", {})}
+        for key, var in all_sharing.items():
+            if (val := self.model._v(var)) > 0:
+                src = self._parse_src_name(key, target)
+                G.add_edge(src, dest, volume=val)
+                edge_volumes[(src, dest)] = val
 
-    def _add_sharing_edges(self, G, edge_volumes, node_def, dest_name, dest_tree_idx):
-        """中間液の共有（あるノードから別のノードへの液体の流れ）を表すエッジを追加する。"""
-        all_sharing = {**node_def.get('intra_sharing_vars',{}), **node_def.get('inter_sharing_vars',{})}
-        for key, w_var_name in all_sharing.items():
-            if (val := self.model.eval(w_var_name).as_long()) > 0:
-                src_name = self._parse_source_node_name(key, dest_tree_idx)
-                G.add_edge(src_name, dest_name, volume=val)
-                edge_volumes[(src_name, dest_name)] = val
-
-    def _parse_source_node_name(self, key, dest_tree_idx):
-        """共有変数のキー文字列（'from_m0_l2k1'など）から供給元ノード名を復元する。"""
-        key = key.replace('from_', '')
-        if key.startswith('m'): # inter-sharing (ツリー間)
-            m_src, lk_src = key.split('_l')
-            l_src, k_src = lk_src.split('k')
-            # return f"{m_src}_l{l_src}_k{k_src}" # <--- 修正前 (例: "m0_l2_k1")
-            return f"v_{m_src}_l{l_src}_k{k_src}" # <--- 修正後 (例: "v_m0_l2_k1")
-        else: # intra-sharing (ツリー内)
-            l_src, k_src = key.split('k')
-            # return f"m{dest_tree_idx}_l{l_src.replace('l','')}_k{k_src}" # <--- 修正前 (例: "m1_l1_k0")
-            return f"v_m{dest_tree_idx}_l{l_src.replace('l','')}_k{k_src}" # <--- 修正後 (例: "v_m1_l1_k0")
+    def _parse_src_name(self, key, target):
+        key = key.replace("from_", "")
+        try:
+            parsed = parse_sharing_key(key)
+            if parsed["type"] == "PEER": return self.problem.peer_nodes[parsed["idx"]]["name"]
+            elif parsed["type"] == "DFMM": return create_dfmm_node_name(parsed["target_idx"], parsed["level"], parsed["node_idx"])
+            elif parsed["type"] == "INTRA": return create_dfmm_node_name(target, parsed["level"], parsed["node_idx"])
+        except: return f"Unknown_{key}"
 
     def _calculate_node_positions(self, G):
-        """ノードを見やすく配置するための座標（x, y）を計算する。"""
         pos = {}
-        # ターゲットごとにX座標をずらして配置
         targets = sorted({d["target"] for n, d in G.nodes(data=True) if d.get("target") is not None})
-        current_x_offset = 0.0
-
-        for target_idx in targets:
-            sub_nodes = [n for n, d in G.nodes(data=True) if d.get("target") == target_idx and d.get("type") != "waste"]
-            if not sub_nodes: continue
-
-            max_width = self._position_nodes_by_level(G, pos, sub_nodes, current_x_offset)
-            self._position_waste_nodes(G, pos, target_idx)
-            current_x_offset += max_width + self.LAYOUT_CONFIG['tree_gap']
-
+        x_offset = 0.0
+        for t in targets:
+            sub = [n for n, d in G.nodes(data=True) if d.get("target") == t and d.get("type") != "waste"]
+            if not sub: continue
+            width = self._pos_level(G, pos, sub, x_offset)
+            self._pos_waste(G, pos, t)
+            x_offset += width + self.LAYOUT_CONFIG["tree_gap"]
         return pos
 
-    def _position_nodes_by_level(self, G, pos, sub_nodes, x_offset):
-        """同じターゲット内で、レベル（階層）ごとにノードのX,Y座標を決定する。"""
-        max_width_in_tree = 0
-        levels = sorted({G.nodes[n]["level"] for n in sub_nodes})
+    def _pos_level(self, G, pos, nodes, x_off):
+        max_w = 0
+        levels = sorted({G.nodes[n]["level"] for n in nodes})
+        for l in levels:
+            row_nodes = [n for n in nodes if G.nodes[n]["level"] == l]
+            reagents = {u for n in row_nodes for u, _ in G.in_edges(n) if G.nodes.get(u, {}).get("type") == "reagent"}
+            row = sorted(list(set(row_nodes) | reagents))
+            width = (len(row) - 1) * self.LAYOUT_CONFIG["x_gap"]
+            start = x_off - width / 2.0
+            for i, n in enumerate(row):
+                pos[n] = (start + i * self.LAYOUT_CONFIG["x_gap"], -l * self.LAYOUT_CONFIG["y_gap"])
+            max_w = max(max_w, width)
+        return max_w
 
-        for level in levels:
-            nodes_at_level = [n for n in sub_nodes if G.nodes[n].get("level") == level]
-            # 試薬ノードも同じレベルに並べる
-            reagent_nodes = {u for n in nodes_at_level for u, _ in G.in_edges(n) if G.nodes.get(u, {}).get("type") == "reagent"}
-            full_row = sorted(list(set(nodes_at_level) | reagent_nodes))
+    def _pos_waste(self, G, pos, t):
+        for n in [n for n, d in G.nodes(data=True) if d.get("type") == "waste" and d.get("target") == t]:
+            p = next(iter(G.predecessors(n)), None)
+            if p and p in pos: pos[n] = (pos[p][0] + self.LAYOUT_CONFIG["waste_node_offset_x"], pos[p][1])
 
-            # レベル内のノードを中央揃えで均等に配置
-            total_width = (len(full_row) - 1) * self.LAYOUT_CONFIG['x_gap']
-            start_x = x_offset - total_width / 2.0
-
-            for i, node_name in enumerate(full_row):
-                pos[node_name] = (start_x + i * self.LAYOUT_CONFIG['x_gap'], -level * self.LAYOUT_CONFIG['y_gap'])
-            max_width_in_tree = max(max_width_in_tree, total_width)
-
-        return max_width_in_tree
-
-    def _position_waste_nodes(self, G, pos, target_idx):
-        """廃棄ノードを、対応する親ノードの右側に配置する。"""
-        waste_nodes = [n for n, d in G.nodes(data=True) if d.get("type") == "waste" and d.get("target") == target_idx]
-        for wn in waste_nodes:
-            parent = next(iter(G.predecessors(wn)), None)
-            if parent and parent in pos:
-                px, py = pos[parent]
-                pos[wn] = (px + self.LAYOUT_CONFIG['waste_node_offset_x'], py)
-
-    def _draw_graph(self, G, pos, edge_volumes, output_dir):
-        """計算された座標に基づき、matplotlibでグラフを描画しPNGファイルとして保存する。"""
+    def _draw_graph(self, G, pos, vols, out):
         fig, ax = plt.subplots(figsize=(20, 12))
+        draw_nodes = [n for n in G.nodes() if n in pos]
+        draw_edges = [(u,v) for u,v,d in G.edges(data=True) if d.get('style')!='invisible' and u in pos and v in pos]
         
-        # --- 描画エラー防止の修正 ---
-        # pos辞書に座標が存在するノードとエッジのみを描画対象とする
-        drawable_nodes = [n for n in G.nodes() if n in pos]
-        drawable_edges = [(u, v) for u, v, d in G.edges(data=True) if d.get('style') != 'invisible' and u in pos and v in pos]
-
-        if not drawable_nodes:
-             print("Warning: No drawable nodes with positions found. Skipping visualization.")
+        if not draw_nodes:
              plt.close(fig)
              return
 
-        node_styles = {n: self._get_node_style(G.nodes[n]) for n in drawable_nodes}
+        styles = {n: self._style(G.nodes[n]) for n in draw_nodes}
+        for s in {v['shape'] for v in styles.values()}:
+            nl = [n for n, v in styles.items() if v['shape'] == s]
+            nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=nl, node_shape=s, 
+                                   node_size=[styles[n]['size'] for n in nl], 
+                                   node_color=[styles[n]['color'] for n in nl], 
+                                   edgecolors='black')
         
-        # --- 修正ここまで ---
+        labels = {n: d['label'] for n,d in G.nodes(data=True) if n in draw_nodes and 'label' in d and d['type']!='waste'}
+        nx.draw_networkx_labels(G, pos, ax=ax, labels=labels, **self.STYLE_CONFIG["font"])
 
-        # ノードの形状ごとに描画（matplotlibの仕様）
-        for shape in {s['shape'] for s in node_styles.values()}:
-            nodelist = [n for n, s in node_styles.items() if s['shape'] == shape]
-            if not nodelist: continue # この形状のノードがなければスキップ
-            nx.draw_networkx_nodes(G, pos, ax=ax, nodelist=nodelist, node_shape=shape,
-                                   node_size=[node_styles[n]['size'] for n in nodelist],
-                                   node_color=[node_styles[n]['color'] for n in nodelist],
-                                   edgecolors='black', linewidths=1.0)
-
-        # ラベル、エッジ、エッジラベルを描画
-        labels = {n: d['label'] for n, d in G.nodes(data=True) if n in drawable_nodes and 'label' in d and d.get('type') != 'waste'}
-        nx.draw_networkx_labels(G, pos, ax=ax, labels=labels, **self.STYLE_CONFIG['font'])
-        
-        # エッジの重みに基づいて色を決定
-        volumes = []
-        if edge_volumes and drawable_edges:
-            volumes = [edge_volumes.get(edge, 0) for edge in drawable_edges]
-            if volumes:
-                min_vol = min(volumes)
-                max_vol = max(volumes) if max(volumes) > min(volumes) else min(volumes) + 1 # 最小と最大が同じ場合のゼロ除算エラー回避
-                
-                # 正規化関数
-                norm = mcolors.Normalize(vmin=min_vol, vmax=max_vol)
-                # カラーマップの取得
-                cmap = plt.get_cmap(self.STYLE_CONFIG['edge_colormap'])
-                
-                edge_colors = [cmap(norm(edge_volumes.get(edge, 0))) for edge in drawable_edges]
+        if vols:
+            vals = [vols.get(e, 0) for e in draw_edges]
+            if vals:
+                norm = mcolors.Normalize(vmin=min(vals), vmax=max(vals) if max(vals) > min(vals) else min(vals)+1)
+                cmap = plt.get_cmap(self.STYLE_CONFIG["edge_colormap"])
+                cols = [cmap(norm(v)) for v in vals]
+                nx.draw_networkx_edges(G, pos, edgelist=draw_edges, ax=ax, edge_color=cols, **self.STYLE_CONFIG["edge"])
+                sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm); sm.set_array([])
+                fig.colorbar(sm, ax=ax, orientation='vertical', fraction=0.02, pad=0.04).set_label("Volume")
             else:
-                edge_colors = ['gray'] * len(drawable_edges) # エッジがない場合はデフォルト色
-        else:
-            edge_colors = ['gray'] * len(drawable_edges) # edge_volumesが空の場合
+                nx.draw_networkx_edges(G, pos, edgelist=draw_edges, ax=ax, edge_color='gray', **self.STYLE_CONFIG["edge"])
+        elif draw_edges:
+            nx.draw_networkx_edges(G, pos, edgelist=draw_edges, ax=ax, edge_color='gray', **self.STYLE_CONFIG["edge"])
 
-        if drawable_edges:
-            nx.draw_networkx_edges(G, pos, edgelist=drawable_edges, ax=ax, 
-                                   # drawable_nodesのサイズリストから適切なサイズを選ぶ（ここでは簡略化）
-                                   node_size=self.STYLE_CONFIG['mix_node']['size'], 
-                                   edge_color=edge_colors, # ここで色を指定
-                                   **self.STYLE_CONFIG['edge'])
-
-            edge_labels = {k: v for k, v in edge_volumes.items() if k in drawable_edges}
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels,
-                                         font_size=self.STYLE_CONFIG['font']['font_size'],
-                                         font_color=self.STYLE_CONFIG['font']['font_color'],
-                                         bbox=self.STYLE_CONFIG['edge_label_bbox'])
-        else:
-            print("No drawable edges found.")
-
-
-        # カラーバーの追加（オプション）
-        if edge_volumes and volumes:
-            # sm = plt.cm.ScalarMable(cmap=cmap, norm=norm) # <--- 修正前
-            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm) # <--- 修正後
-            sm.set_array([])
-            cbar = fig.colorbar(sm, ax=ax, orientation='vertical', fraction=0.02, pad=0.04)
-            cbar.set_label("Volume", rotation=270, labelpad=15, fontsize=12)
-
-
-        ax.set_title("Mixing Tree Visualization", fontsize=18, pad=20)
-        ax.axis('off')
+        # [NOTE] 数値ラベルの描画はコメントアウト済み
+        
+        ax.set_title("Mixing Tree Visualization", fontsize=18); ax.axis('off')
         plt.tight_layout()
-        image_path = os.path.join(output_dir, 'mixing_tree_visualization.png')
-
         try:
-            plt.savefig(image_path, dpi=300, bbox_inches='tight')
-            print(f"Graph visualization saved to: {image_path}")
-        except Exception as e:
-            print(f"Error saving visualization image: {e}")
-        finally:
-            plt.close(fig)
+            plt.savefig(os.path.join(out, 'mixing_tree_visualization.png'), dpi=300, bbox_inches='tight')
+            print(f"Graph saved to: {out}")
+        except Exception as e: print(f"Error saving graph: {e}")
+        finally: plt.close(fig)
 
-    def _get_node_style(self, node_data):
-        """ノードのデータ（typeなど）に基づいて、適用するスタイル辞書を返すヘルパー関数。"""
-        cfg = self.STYLE_CONFIG
-        node_type = node_data.get('type')
-        if node_type == 'mix': style = cfg['target_node'] if node_data.get('level') == 0 else cfg['mix_node']
-        elif node_type == 'reagent': style = cfg['reagent_node']
-        elif node_type == 'waste': style = cfg['waste_node']
-        else: style = cfg['default_node']
-        return {'color': style['color'], 'size': style['size'], 'shape': style.get('shape', 'o')}
+    def _style(self, d):
+        t = d.get('type')
+        c = self.STYLE_CONFIG
+        s = c['target_node'] if t=='mix' and d.get('level')==0 else c['mix_node'] if t=='mix' else c['mix_peer_node'] if t=='mix_peer' else c['reagent_node'] if t=='reagent' else c['waste_node'] if t=='waste' else c['default_node']
+        return {'color': s['color'], 'size': s['size'], 'shape': s.get('shape', 'o')}
