@@ -2,7 +2,7 @@
 RUN_NAME = "Test"
 
 # 実行モード: 'manual', 'auto', 'auto_permutations', 'random', 'file_load'
-FACTOR_EXECUTION_MODE = "file_load"
+FACTOR_EXECUTION_MODE = "auto"
 
 # 最適化の目的: "waste", "operations"
 OPTIMIZATION_MODE = "waste"
@@ -20,7 +20,7 @@ MAX_LEVEL_DIFF = None
 MAX_MIXER_SIZE = 5
 
 # --- 'random' モード用設定 ---
-RANDOM_N_TARGETS = 4
+RANDOM_N_TARGETS = 3
 RANDOM_T_REAGENTS = 3
 RANDOM_K_RUNS = 10
 RANDOM_S_RATIO_SUM_DEFAULT = 18
