@@ -272,6 +272,10 @@ class OrToolsSolver:
             all_waste_vars.append(waste_var)
             
         total_waste = sum(all_waste_vars)
+
+        if self.objective_mode == "waste":
+            self.model.Add(total_waste >= 1)
+            
         all_activity_vars = [self._get_var(f"IsActive_m{m}_l{l}_k{k}") for m, l, k, node_def in self._iterate_all_nodes()]
         total_operations = sum(all_activity_vars)
         
