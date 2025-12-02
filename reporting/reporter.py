@@ -99,4 +99,7 @@ class SolutionReporter:
                     f"     Ratio composition: {detail['ratio_composition']}",
                     f"     Mixing: {detail['mixing_str']}" if detail["mixing_str"] else "     (No mixing)"
                 ])
+        
+        # [追加] 最後に合計時間を再出力
+        content.append(f"\nTotal Execution Time: {elapsed_time:.2f} seconds")
         return content
