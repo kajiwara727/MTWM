@@ -1,145 +1,174 @@
-# core/solver/engine.py
 import time
 import sys
 from ortools.sat.python import cp_model
 from utils.config_loader import Config
+from utils import parse_sharing_key
 from .solution import OrToolsSolutionModel
 
 sys.setrecursionlimit(2000)
 
-class SolutionCallback(cp_model.CpSolverSolutionCallback):
-    def __init__(self, problem, variable_map, forest_vars, peer_vars, objective_var, objective_mode):
+class SolutionPrinter(cp_model.CpSolverSolutionCallback):
+    """解が見つかるたびに進捗を表示するコールバッククラス"""
+    def __init__(self):
         cp_model.CpSolverSolutionCallback.__init__(self)
-        self.problem = problem
-        self.variable_map = variable_map
-        self.forest_vars = forest_vars # [NEW]
-        self.peer_vars = peer_vars     # [NEW]
-        self.objective_var = objective_var
-        self.objective_mode = objective_mode
-        self.best_model = None
-        self.best_value = float('inf')
-        self.best_analysis = None
-        self.start_time = time.time()
+        self.__solution_count = 0
+        self.__start_time = time.time()
 
-    def OnSolutionCallback(self):
-        current_value = self.Value(self.objective_var)
-        if current_value < self.best_value:
-            elapsed = time.time() - self.start_time
-            print(f"Found a new, better solution with {self.objective_mode}: {int(current_value)} (Time: {elapsed:.2f}s)")
-            self.best_value = current_value
-            
-            # [MODIFIED] forest_vars, peer_vars を渡す
-            self.best_model = OrToolsSolutionModel(
-                self.problem, self, self.variable_map, 
-                self.forest_vars, self.peer_vars, current_value
-            )
-            self.best_analysis = self.best_model.analyze()
+    def on_solution_callback(self):
+        self.__solution_count += 1
+        current_time = time.time()
+        obj = self.ObjectiveValue()
+        print(f"Solution #{self.__solution_count}: Objective = {obj}, Time = {current_time - self.__start_time:.2f}s")
+
+    @property
+    def solution_count(self):
+        return self.__solution_count
 
 class OrToolsSolver:
-    def __init__(self, problem, objective_mode="waste", max_workers=None):
+    """MTWMProblem を Or-Tools CP-SAT モデルに変換し、最適化を実行するクラス。"""
+
+    def __init__(self, problem, objective_mode="waste"):
         self.problem = problem
         self.objective_mode = objective_mode
         self.model = cp_model.CpModel()
         self.solver = cp_model.CpSolver()
 
+        # 変数格納用コンテナ
+        self.forest_vars = [] 
+        
+        # 既存システム(SolutionModel等)との互換性のためのマップ
+        self.variable_map = {} 
+        self.objective_variable = None
+
+        self._configure_solver()
+        self._set_variables_and_constraints()
+
+    def _configure_solver(self):
+        """ソルバーのパラメータ設定"""
         if Config.MAX_CPU_WORKERS and Config.MAX_CPU_WORKERS > 0:
-            self.solver.parameters.num_search_workers = Config.MAX_CPU_WORKERS
+            self.solver.parameters.num_workers = Config.MAX_CPU_WORKERS
+        else:
+            self.solver.parameters.num_workers = 0 
+        
         if Config.MAX_TIME_PER_RUN_SECONDS and Config.MAX_TIME_PER_RUN_SECONDS > 0:
             self.solver.parameters.max_time_in_seconds = float(Config.MAX_TIME_PER_RUN_SECONDS)
+
         if Config.ABSOLUTE_GAP_LIMIT and Config.ABSOLUTE_GAP_LIMIT > 0:
             self.solver.parameters.absolute_gap_limit = float(Config.ABSOLUTE_GAP_LIMIT)
-
+        
+        self.solver.parameters.linearization_level = 2
+        self.solver.parameters.optimize_with_core = True 
+        self.solver.parameters.max_num_cuts = 2000 
+        self.solver.parameters.cut_level = 2
+        self.solver.parameters.boolean_encoding_level = 2
+        self.solver.parameters.symmetry_level = 2 
         self.solver.parameters.log_search_progress = True
-        self.solver.parameters.linearization_level = 2 
-        
-        self.variable_map = {}
-        self.forest_vars = [] # [NEW]
-        self.peer_vars = []   # [NEW] (MTWMでは空だが互換性のため用意)
-        
-        self._set_variables_and_constraints()
 
     def solve(self):
         start_time = time.time()
         print(f"\n--- Solving (mode: {self.objective_mode.upper()}) with Or-Tools CP-SAT ---")
         
-        solution_callback = SolutionCallback(
-            self.problem, self.variable_map, self.forest_vars, self.peer_vars, 
-            self.objective_variable, self.objective_mode
-        )
-        status = self.solver.Solve(self.model, solution_callback)
+        solution_printer = SolutionPrinter()
+        status = self.solver.Solve(self.model, solution_printer)
+        
         elapsed_time = time.time() - start_time
-        
-        best_model = solution_callback.best_model
-        best_value = solution_callback.best_value if solution_callback.best_value != float('inf') else None
-        best_analysis = solution_callback.best_analysis
-        
+        best_model = None
+        best_value = None
+        best_analysis = None
+
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-            final_val = self.solver.ObjectiveValue()
-            if best_value is None or abs(final_val - best_value) > 1e-6:
-                print(f"Or-Tools found final solution ({self.solver.StatusName(status)}): {int(final_val)}")
-                best_value = final_val
-                # [MODIFIED] forest_vars, peer_vars を渡す
-                best_model = OrToolsSolutionModel(
-                    self.problem, self.solver, self.variable_map, 
-                    self.forest_vars, self.peer_vars, best_value
-                )
-                best_analysis = best_model.analyze()
-        
+            best_value = self.solver.ObjectiveValue()
+            status_str = "OPTIMAL" if status == cp_model.OPTIMAL else "FEASIBLE"
+            print(f"Or-Tools finished: {status_str} solution found. Value: {int(best_value)}")
+            print(f"Total solutions found: {solution_printer.solution_count}")
+            
+            # Peer変数は存在しないため空リストを渡すか、引数から除外（SolutionModelの実装依存）
+            # ここでは標準的な引数構成を想定
+            best_model = OrToolsSolutionModel(
+                self.problem, self.solver, self.variable_map,
+                self.forest_vars, [], best_value
+            )
+            best_analysis = best_model.analyze()
+        else:
+            print(f"Or-Tools Solver status: {self.solver.StatusName(status)}")
+                
         print("--- Or-Tools Solver Finished ---")
         return best_model, best_value, best_analysis, elapsed_time
 
-    # ... (変数定義メソッドを修正) ...
-    
-    def _add_var(self, name, lb, ub):
-        if name in self.variable_map: return self.variable_map[name]
-        var = self.model.NewIntVar(lb, ub, name)
+    # --- 変数定義 ---
+
+    def _add_var(self, var, name):
+        """変数をvariable_mapに登録するヘルパー"""
         self.variable_map[name] = var
         return var
 
-    def _get_var(self, name): return self.variable_map[name]
-
-    def _set_variables_and_constraints(self):
-        self._define_or_tools_variables()
-        self._set_initial_constraints()
-        self._set_conservation_constraints()
-        self._set_concentration_constraints()
-        self._set_ratio_sum_constraints()
-        self._set_leaf_node_constraints()
-        self._set_mixer_capacity_constraints()
-        self._set_activity_constraints()
-        self._set_symmetry_breaking_constraints()
-        self.objective_variable = self._set_objective_function()
-        
     def _define_or_tools_variables(self):
-        self.forest_vars = [] # 初期化
-        self.peer_vars = []   # MTWMにはPeerノードがないため空のまま
+        """変数定義：DFMMノードの変数を初期化"""
+        self.forest_vars = []
 
-        for m, tree in enumerate(self.problem.forest):
+        for target_idx, tree in enumerate(self.problem.forest):
             tree_data = {}
-            for l, nodes in tree.items():
+            # tree は {level: [nodes...]} の辞書
+            for level, nodes in tree.items():
                 level_nodes = []
                 for k, node_def in enumerate(nodes):
-                    p_node = self.problem.p_values[m][(l, k)]
-                    f_value = self.problem.targets_config[m]['factors'][l]
-                    
-                    # [MODIFIED] 変数オブジェクトをリスト/辞書として保持する
-                    ratio_vars = [self._add_var(name, 0, p_node) for name in node_def['ratio_vars']]
+                    # p_values を使用
+                    p_node = self.problem.p_values[target_idx][(level, k)]
+                    f_value = self.problem.targets_config[target_idx]['factors'][level]
                     
                     reagent_max = max(0, f_value - 1)
-                    reagent_vars = [self._add_var(name, 0, reagent_max) for name in node_def['reagent_vars']]
                     
-                    sharing_max = f_value
-                    if Config.MAX_SHARING_VOLUME is not None: sharing_max = min(f_value, Config.MAX_SHARING_VOLUME)
+                    # 比率変数
+                    ratio_vars = [
+                        self._add_var(self.model.NewIntVar(0, p_node, name), name)
+                        for name in node_def['ratio_vars']
+                    ]
                     
-                    intra_sharing_vars = {key: self._add_var(name, 0, sharing_max) for key, name in node_def.get('intra_sharing_vars', {}).items()}
-                    inter_sharing_vars = {key: self._add_var(name, 0, sharing_max) for key, name in node_def.get('inter_sharing_vars', {}).items()}
+                    # 試薬使用量変数
+                    reagent_vars = [
+                        self._add_var(self.model.NewIntVar(0, reagent_max, name), name)
+                        for name in node_def['reagent_vars']
+                    ]
                     
-                    total_input_var = self._add_var(node_def['total_input_var_name'], 0, f_value)
-                    is_active_var = self._add_var(f"IsActive_m{m}_l{l}_k{k}", 0, 1) 
-                    waste_var = self._add_var(node_def['waste_var_name'], 0, f_value) if node_def['waste_var_name'] else None
+                    max_sharing_vol = f_value
+                    if Config.MAX_SHARING_VOLUME is not None:
+                        max_sharing_vol = min(f_value, Config.MAX_SHARING_VOLUME)
 
-                    # 構造化データを保存
-                    level_nodes.append({
+                    # 内部共有変数 (Intra)
+                    intra_sharing_vars = {}
+                    for key, name in node_def.get('intra_sharing_vars', {}).items():
+                        intra_sharing_vars[key] = self._add_var(
+                            self.model.NewIntVar(0, max_sharing_vol, name), name
+                        )
+                    
+                    # 外部共有変数 (Inter)
+                    inter_sharing_vars = {}
+                    for key, name in node_def.get('inter_sharing_vars', {}).items():
+                        inter_sharing_vars[key] = self._add_var(
+                            self.model.NewIntVar(0, max_sharing_vol, name), name
+                        )
+
+                    # 基本状態変数
+                    total_input_var = self._add_var(
+                        self.model.NewIntVar(0, f_value, node_def['total_input_var_name']),
+                        node_def['total_input_var_name']
+                    )
+                    
+                    # IsActive変数の名前は固定パターンで生成
+                    is_active_name = f"IsActive_m{target_idx}_l{level}_k{k}"
+                    is_active_var = self._add_var(
+                        self.model.NewBoolVar(is_active_name), is_active_name
+                    )
+
+                    waste_var = None
+                    if node_def['waste_var_name']:
+                        waste_var = self._add_var(
+                            self.model.NewIntVar(0, f_value, node_def['waste_var_name']),
+                            node_def['waste_var_name']
+                        )
+
+                    # 構造化データとして保存
+                    node_vars = {
                         "ratio_vars": ratio_vars,
                         "reagent_vars": reagent_vars,
                         "intra_sharing_vars": intra_sharing_vars,
@@ -147,145 +176,238 @@ class OrToolsSolver:
                         "total_input_var": total_input_var,
                         "is_active_var": is_active_var,
                         "waste_var": waste_var
-                    })
-                tree_data[l] = level_nodes
+                    }
+                    level_nodes.append(node_vars)
+                
+                tree_data[level] = level_nodes
             self.forest_vars.append(tree_data)
 
-    # ... (以下のメソッドは前回と同じ内容で維持してください) ...
-    def _get_input_vars(self, node_def):
-        var_names = (node_def.get('reagent_vars', []) + list(node_def.get('intra_sharing_vars', {}).values()) + list(node_def.get('inter_sharing_vars', {}).values()))
-        return [self._get_var(name) for name in var_names]
+    def _set_variables_and_constraints(self):
+        """制約設定のメインフロー"""
+        self._define_or_tools_variables()
+        self._set_initial_constraints()
+        self._set_conservation_constraints()
+        self._set_concentration_constraints()
+        self._set_ratio_sum_constraints()
+        self._set_leaf_node_constraints()
+        self._set_mixer_capacity_constraints()
+        self._set_symmetry_breaking_constraints()
+        self._set_activity_constraints()
+        
+        self.objective_variable = self._set_objective_function()
+        self._set_search_strategy()
 
-    def _get_outgoing_vars(self, m_src, l_src, k_src):
+    # --- ヘルパーメソッド ---
+
+    def _get_input_vars(self, node_vars):
+        """ノードへの全入力変数を取得（試薬 + Intra + Inter）"""
+        return (
+            node_vars.get("reagent_vars", [])
+            + list(node_vars.get("intra_sharing_vars", {}).values())
+            + list(node_vars.get("inter_sharing_vars", {}).values())
+        )
+
+    def _get_outgoing_vars(self, src_target_idx, src_level, src_node_idx):
+        """あるノードから出ていく全共有変数を取得"""
         outgoing = []
-        key_intra = f"from_l{l_src}k{k_src}"
-        key_inter = f"from_m{m_src}_l{l_src}k{k_src}"
-        for m_dst, tree_dst in enumerate(self.problem.forest):
-            for l_dst, level_dst in tree_dst.items():
-                for k_dst, node_def in enumerate(level_dst):
-                    if m_src == m_dst and key_intra in node_def.get('intra_sharing_vars', {}):
-                        outgoing.append(self._get_var(node_def['intra_sharing_vars'][key_intra]))
-                    elif m_src != m_dst and key_inter in node_def.get('inter_sharing_vars', {}):
-                        outgoing.append(self._get_var(node_def['inter_sharing_vars'][key_inter]))
+        key_intra = f"from_l{src_level}k{src_node_idx}"
+        key_inter = f"from_m{src_target_idx}_l{src_level}k{src_node_idx}"
+        
+        for dst_target_idx, tree_dst in enumerate(self.forest_vars):
+            for dst_level, level_dst in tree_dst.items():
+                for node_dst in level_dst:
+                    # Intra-sharing
+                    if src_target_idx == dst_target_idx and key_intra in node_dst.get("intra_sharing_vars", {}):
+                        outgoing.append(node_dst["intra_sharing_vars"][key_intra])
+                    # Inter-sharing
+                    elif src_target_idx != dst_target_idx and key_inter in node_dst.get("inter_sharing_vars", {}):
+                        outgoing.append(node_dst["inter_sharing_vars"][key_inter])
         return outgoing
-    
+
     def _iterate_all_nodes(self):
-        for m, tree in enumerate(self.problem.forest):
-            for l, nodes in tree.items():
-                for k, node_def in enumerate(nodes):
-                    yield m, l, k, node_def
+        """全DFMMノードをイテレートするジェネレータ"""
+        for target_idx, tree in enumerate(self.forest_vars):
+            for level, nodes in tree.items():
+                for node_idx, node_vars in enumerate(nodes):
+                    yield target_idx, level, node_idx, node_vars
+
+    # --- 制約メソッド ---
 
     def _set_initial_constraints(self):
+        """ルートノードの濃度比率をターゲット定義に固定"""
         for m, target in enumerate(self.problem.targets_config):
-            root_def = self.problem.forest[m][0][0]
-            for t in range(self.problem.num_reagents):
-                self.model.Add(self._get_var(root_def['ratio_vars'][t]) == target['ratios'][t])
+            if 0 in self.forest_vars[m] and self.forest_vars[m][0]:
+                root_vars = self.forest_vars[m][0][0]
+                for t in range(self.problem.num_reagents):
+                    self.model.Add(root_vars['ratio_vars'][t] == target['ratios'][t])
 
     def _set_conservation_constraints(self):
-        for m_src, l_src, k_src, node_def in self._iterate_all_nodes():
-            total_produced_var = self._get_var(node_def['total_input_var_name'])
-            self.model.Add(total_produced_var == sum(self._get_input_vars(node_def)))
+        """質量保存則: 生産量 == 全入力の和"""
+        for _, _, _, node_vars in self._iterate_all_nodes():
+            total_produced = node_vars["total_input_var"]
+            self.model.Add(total_produced == sum(self._get_input_vars(node_vars)))
 
     def _set_concentration_constraints(self):
-        for m_dst, l_dst, k_dst, node_def in self._iterate_all_nodes():
-            p_dst = self.problem.p_values[m_dst][(l_dst, k_dst)]
-            f_dst = self.problem.targets_config[m_dst]['factors'][l_dst]
+        """濃度保存則"""
+        for dst_target_idx, dst_level, dst_node_idx, node_vars in self._iterate_all_nodes():
+            p_dst = self.problem.p_values[dst_target_idx][(dst_level, dst_node_idx)]
+            f_dst = self.problem.targets_config[dst_target_idx]['factors'][dst_level]
+            
+            node_name_prefix = f"m{dst_target_idx}l{dst_level}k{dst_node_idx}"
+
             for t in range(self.problem.num_reagents):
-                lhs = f_dst * self._get_var(node_def['ratio_vars'][t])
-                reagent_var = self._get_var(node_def['reagent_vars'][t])
-                rhs_terms = [p_dst * reagent_var]
+                lhs = f_dst * node_vars['ratio_vars'][t]
+                rhs_terms = []
                 
-                for key, w_var_name in node_def.get('intra_sharing_vars', {}).items():
-                    l_src, k_src = map(int, key.replace("from_l", "").split("k"))
-                    r_src_var = self._get_var(self.problem.forest[m_dst][l_src][k_src]['ratio_vars'][t])
-                    w_var = self._get_var(w_var_name)
-                    p_src = self.problem.p_values[m_dst][(l_src, k_src)]
-                    product_bound = p_src * f_dst 
-                    product_var = self._add_var(f"Prod_intra_m{m_dst}l{l_dst}k{k_dst}_t{t}_from_{key}", 0, product_bound)
-                    self.model.AddMultiplicationEquality(product_var, [r_src_var, w_var])
-                    rhs_terms.append(product_var * (p_dst // p_src)) 
+                # 1. 直接投入
+                rhs_terms.append(p_dst * node_vars['reagent_vars'][t])
+                
+                # 2. Intra Sharing
+                for key, w_var in node_vars.get('intra_sharing_vars', {}).items():
+                    key_no_prefix = key.replace("from_", "")
+                    parsed = parse_sharing_key(key_no_prefix)
+                    src_l, src_k = parsed["level"], parsed["node_idx"]
                     
-                for key, w_var_name in node_def.get('inter_sharing_vars', {}).items():
-                    m_src_str, lk_src_str = key.replace("from_m", "").split("_l")
-                    m_src = int(m_src_str)
-                    l_src, k_src = map(int, lk_src_str.split("k"))
-                    r_src_var = self._get_var(self.problem.forest[m_src][l_src][k_src]['ratio_vars'][t])
-                    w_var = self._get_var(w_var_name)
-                    p_src = self.problem.p_values[m_src][(l_src, k_src)]
-                    product_bound = p_src * f_dst
-                    product_var = self._add_var(f"Prod_inter_m{m_dst}l{l_dst}k{k_dst}_t{t}_from_{key}", 0, product_bound)
-                    self.model.AddMultiplicationEquality(product_var, [r_src_var, w_var])
-                    rhs_terms.append(product_var * (p_dst // p_src))
+                    r_src = self.forest_vars[dst_target_idx][src_l][src_k]['ratio_vars'][t]
+                    p_src = self.problem.p_values[dst_target_idx][(src_l, src_k)]
+                    f_src = self.problem.targets_config[dst_target_idx]['factors'][src_l]
+                    max_w = min(f_src, Config.MAX_SHARING_VOLUME or f_src)
+                    
+                    prod = self.model.NewIntVar(0, p_src * max_w, f"P_intra_{node_name_prefix}_r{t}_{key}")
+                    self.model.AddMultiplicationEquality(prod, [r_src, w_var])
+                    rhs_terms.append(prod * (p_dst // p_src))
+
+                # 3. Inter Sharing (Peerロジックを除外)
+                for key, w_var in node_vars.get('inter_sharing_vars', {}).items():
+                    key_no_prefix = key.replace("from_", "")
+                    parsed = parse_sharing_key(key_no_prefix)
+                    
+                    # Peer Checkを除外し、常にTree間共有として処理
+                    src_m, src_l, src_k = parsed["target_idx"], parsed["level"], parsed["node_idx"]
+                    
+                    r_src = self.forest_vars[src_m][src_l][src_k]['ratio_vars'][t]
+                    p_src = self.problem.p_values[src_m][(src_l, src_k)]
+                    f_src = self.problem.targets_config[src_m]['factors'][src_l]
+                    max_w = min(f_src, Config.MAX_SHARING_VOLUME or f_src)
+                    
+                    prod = self.model.NewIntVar(0, p_src * max_w, f"P_inter_{node_name_prefix}_r{t}_{key}")
+                    self.model.AddMultiplicationEquality(prod, [r_src, w_var])
+                    rhs_terms.append(prod * (p_dst // p_src))
+
                 self.model.Add(lhs == sum(rhs_terms))
 
     def _set_ratio_sum_constraints(self):
-        for m, l, k, node_def in self._iterate_all_nodes():
+        """比率変数の総和制約"""
+        for m, l, k, node_vars in self._iterate_all_nodes():
             p_node = self.problem.p_values[m][(l, k)]
-            ratio_vars = [self._get_var(name) for name in node_def['ratio_vars']]
-            is_active_var = self._get_var(f"IsActive_m{m}_l{l}_k{k}")
-            self.model.Add(sum(ratio_vars) == p_node).OnlyEnforceIf(is_active_var)
-            for r_var in ratio_vars: self.model.Add(r_var == 0).OnlyEnforceIf(is_active_var.Not())
+            is_active = node_vars["is_active_var"]
+            self.model.Add(sum(node_vars['ratio_vars']) == p_node * is_active)
 
     def _set_leaf_node_constraints(self):
-        for m, l, k, node_def in self._iterate_all_nodes():
+        """葉ノード制約"""
+        for m, l, k, node_vars in self._iterate_all_nodes():
             p_node = self.problem.p_values[m][(l, k)]
             f_node = self.problem.targets_config[m]['factors'][l]
             if p_node == f_node:
                 for t in range(self.problem.num_reagents):
-                    self.model.Add(self._get_var(node_def['ratio_vars'][t]) == self._get_var(node_def['reagent_vars'][t]))
+                    self.model.Add(node_vars['ratio_vars'][t] == node_vars['reagent_vars'][t])
 
     def _set_mixer_capacity_constraints(self):
-        for m, l, k, node_def in self._iterate_all_nodes():
+        """ミキサー容量制約"""
+        for m, l, k, node_vars in self._iterate_all_nodes():
             f_value = self.problem.targets_config[m]['factors'][l]
-            total_sum_var = self._get_var(node_def['total_input_var_name'])
-            is_active_var = self._get_var(f"IsActive_m{m}_l{l}_k{k}")
-            if l == 0: 
-                self.model.Add(total_sum_var == f_value)
-                self.model.Add(is_active_var == 1)
-            else: 
-                self.model.Add(total_sum_var == is_active_var * f_value)
-                
+            total_sum = node_vars["total_input_var"]
+            is_active = node_vars["is_active_var"]
+            
+            if l == 0:
+                self.model.Add(total_sum == f_value)
+                self.model.Add(is_active == 1)
+            else:
+                self.model.Add(total_sum == f_value * is_active)
+
     def _set_activity_constraints(self):
-        for m_src, l_src, k_src, node_def in self._iterate_all_nodes():
-            if l_src == 0: continue 
-            total_used_vars = self._get_outgoing_vars(m_src, l_src, k_src)
-            is_active_var = self._get_var(f"IsActive_m{m_src}_l{l_src}_k{k_src}")
-            self.model.Add(sum(total_used_vars) >= is_active_var)
+        """アクティビティ制約"""
+        for m, l, k, node_vars in self._iterate_all_nodes():
+            if l == 0: continue 
+            total_used_vars = self._get_outgoing_vars(m, l, k)
+            is_active = node_vars["is_active_var"]
+            total_used = sum(total_used_vars)
+            self.model.Add(total_used >= 1).OnlyEnforceIf(is_active)
+            self.model.Add(total_used == 0).OnlyEnforceIf(is_active.Not())
 
     def _set_symmetry_breaking_constraints(self):
-        for m, tree in enumerate(self.problem.forest):
-            for l, nodes in tree.items():
-                if len(nodes) > 1:
-                    for k in range(len(nodes) - 1):
-                        is_active_k = self._get_var(f"IsActive_m{m}_l{l}_k{k}")
-                        is_active_k1 = self._get_var(f"IsActive_m{m}_l{l}_k{k+1}")
-                        self.model.Add(is_active_k >= is_active_k1)
+        """対称性排除"""
+        for tree_vars in self.forest_vars:
+            for nodes_vars_list in tree_vars.values():
+                if len(nodes_vars_list) > 1:
+                    for k in range(len(nodes_vars_list) - 1):
+                        node_k = nodes_vars_list[k]
+                        node_k1 = nodes_vars_list[k+1]
+                        self.model.Add(node_k["is_active_var"] >= node_k1["is_active_var"])
 
     def _set_objective_function(self):
+        """目的関数の設定"""
         all_waste_vars = []
-        for m_src, l_src, k_src, node_def in self._iterate_all_nodes():
-            if l_src == 0: continue 
-            total_prod_var = self._get_var(node_def['total_input_var_name'])
-            total_used_vars = self._get_outgoing_vars(m_src, l_src, k_src)
-            waste_var = self._get_var(node_def['waste_var_name'])
-            self.model.Add(waste_var == total_prod_var - sum(total_used_vars))
+        all_activity_vars = []
+        all_reagent_vars = []
+        
+        for m, l, k, node_vars in self._iterate_all_nodes():
+            if l == 0:
+                all_activity_vars.append(node_vars["is_active_var"])
+                continue
+            
+            total_prod = node_vars["total_input_var"]
+            total_used = sum(self._get_outgoing_vars(m, l, k))
+            waste_var = node_vars["waste_var"]
+            
+            self.model.Add(waste_var == total_prod - total_used)
+            
             all_waste_vars.append(waste_var)
+            all_activity_vars.append(node_vars["is_active_var"])
+            all_reagent_vars.extend(node_vars.get("reagent_vars", []))
             
         total_waste = sum(all_waste_vars)
+        total_operations = sum(all_activity_vars)
+        total_reagents = sum(all_reagent_vars)
 
         if self.objective_mode == "waste":
             self.model.Add(total_waste >= 1)
-            
-        all_activity_vars = [self._get_var(f"IsActive_m{m}_l{l}_k{k}") for m, l, k, node_def in self._iterate_all_nodes()]
-        total_operations = sum(all_activity_vars)
-        
-        if self.objective_mode == 'waste':
             self.model.Minimize(total_waste)
-            self.variable_map["objective_variable"] = total_waste 
+            self.variable_map["objective_variable"] = total_waste
             return total_waste
-        elif self.objective_mode == 'operations':
+            
+        elif self.objective_mode == "operations":
             self.model.Minimize(total_operations)
-            self.variable_map["objective_variable"] = total_operations 
+            self.variable_map["objective_variable"] = total_operations
             return total_operations
+
+        elif self.objective_mode == "reagents":
+            self.model.Minimize(total_reagents)
+            return total_reagents
+
         else:
             raise ValueError(f"Unknown optimization mode: '{self.objective_mode}'")
+
+    def _set_search_strategy(self):
+        """探索戦略"""
+        all_active_vars = []
+        all_sharing_vars = []
+
+        for _, _, _, node_vars in self._iterate_all_nodes():
+            all_active_vars.append(node_vars["is_active_var"])
+            all_sharing_vars.extend(node_vars.get("intra_sharing_vars", {}).values())
+            all_sharing_vars.extend(node_vars.get("inter_sharing_vars", {}).values())
+        
+        if all_active_vars:
+            self.model.AddDecisionStrategy(
+                all_active_vars,
+                cp_model.CHOOSE_FIRST,
+                cp_model.SELECT_MIN_VALUE 
+            )
+        
+        if all_sharing_vars:
+            self.model.AddDecisionStrategy(
+                all_sharing_vars,
+                cp_model.CHOOSE_LOWEST_MIN, 
+                cp_model.SELECT_MIN_VALUE 
+            )
