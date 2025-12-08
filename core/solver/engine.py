@@ -4,6 +4,8 @@ from ortools.sat.python import cp_model
 from utils.config_loader import Config
 from utils import parse_sharing_key
 from .solution import OrToolsSolutionModel
+import math
+from functools import reduce
 
 sys.setrecursionlimit(2000)
 
@@ -57,7 +59,7 @@ class OrToolsSolver:
             self.solver.parameters.absolute_gap_limit = float(Config.ABSOLUTE_GAP_LIMIT)
         
         self.solver.parameters.linearization_level = 2
-        self.solver.parameters.optimize_with_core = True 
+        self.solver.parameters.optimize_with_core =False
         self.solver.parameters.max_num_cuts = 2000 
         self.solver.parameters.cut_level = 2
         self.solver.parameters.boolean_encoding_level = 2
@@ -191,11 +193,9 @@ class OrToolsSolver:
         self._set_ratio_sum_constraints()
         self._set_leaf_node_constraints()
         self._set_mixer_capacity_constraints()
-        self._set_symmetry_breaking_constraints()
         self._set_activity_constraints()
         
         self.objective_variable = self._set_objective_function()
-        self._set_search_strategy()
 
     # --- ヘルパーメソッド ---
 
@@ -247,54 +247,98 @@ class OrToolsSolver:
             total_produced = node_vars["total_input_var"]
             self.model.Add(total_produced == sum(self._get_input_vars(node_vars)))
 
+    def _lcm(self, numbers):
+        """整数のリストの最小公倍数を計算するヘルパー"""
+        if not numbers:
+            return 1
+        return reduce(lambda x, y: (x * y) // math.gcd(x, y), numbers)
+
     def _set_concentration_constraints(self):
-        """濃度保存則"""
+        """濃度保存則: LCMを用いて整数演算のみで厳密に計算する"""
+        
         for dst_target_idx, dst_level, dst_node_idx, node_vars in self._iterate_all_nodes():
             p_dst = self.problem.p_values[dst_target_idx][(dst_level, dst_node_idx)]
             f_dst = self.problem.targets_config[dst_target_idx]['factors'][dst_level]
-            
             node_name_prefix = f"m{dst_target_idx}l{dst_level}k{dst_node_idx}"
 
+            # 1. 入力元の情報を収集 (P値と変数を取得)
+            # 形式: (p_src, ratio_var, volume_var, key_name, scaling_limit)
+            input_sources = []
+
+            # (A) Intra Sharing
+            for key, w_var in node_vars.get('intra_sharing_vars', {}).items():
+                key_no_prefix = key.replace("from_", "")
+                parsed = parse_sharing_key(key_no_prefix)
+                src_l, src_k = parsed["level"], parsed["node_idx"]
+                
+                p_src = self.problem.p_values[dst_target_idx][(src_l, src_k)]
+                r_src_vars = self.forest_vars[dst_target_idx][src_l][src_k]['ratio_vars']
+                f_src = self.problem.targets_config[dst_target_idx]['factors'][src_l]
+                
+                input_sources.append({
+                    "p_src": p_src, "ratio_vars": r_src_vars, "w_var": w_var,
+                    "key": key, "limit_vol": f_src
+                })
+
+            # (B) Inter Sharing
+            for key, w_var in node_vars.get('inter_sharing_vars', {}).items():
+                key_no_prefix = key.replace("from_", "")
+                parsed = parse_sharing_key(key_no_prefix)
+                src_m, src_l, src_k = parsed["target_idx"], parsed["level"], parsed["node_idx"]
+                
+                p_src = self.problem.p_values[src_m][(src_l, src_k)]
+                r_src_vars = self.forest_vars[src_m][src_l][src_k]['ratio_vars']
+                f_src = self.problem.targets_config[src_m]['factors'][src_l]
+
+                input_sources.append({
+                    "p_src": p_src, "ratio_vars": r_src_vars, "w_var": w_var,
+                    "key": key, "limit_vol": f_src
+                })
+
+            # 2. LCM (最小公倍数) の計算
+            # ターゲットのp_dst と すべてのソースの p_src のLCMをとる
+            all_p_values = [src["p_src"] for src in input_sources] + [p_dst]
+            common_multiple = self._lcm(all_p_values)
+
+            # 3. 試薬ごとの保存則制約を作成
+            # 基本式: Vol * Ratio * (LCM / P) の総和が等しい
+            
             for t in range(self.problem.num_reagents):
-                lhs = f_dst * node_vars['ratio_vars'][t]
+                # --- 左辺 (Output) ---
+                # LHS = f_dst * ratio_dst * (LCM / p_dst)
+                lhs_scale = common_multiple // p_dst
+                # 大きくなりすぎないよう、計算途中用の変数を定義するか、直接式を書く
+                # ここではスッキリさせるため直接記述
+                lhs_term = f_dst * node_vars['ratio_vars'][t] * lhs_scale
+
+                # --- 右辺 (Inputs) ---
                 rhs_terms = []
-                
-                # 1. 直接投入
-                rhs_terms.append(p_dst * node_vars['reagent_vars'][t])
-                
-                # 2. Intra Sharing
-                for key, w_var in node_vars.get('intra_sharing_vars', {}).items():
-                    key_no_prefix = key.replace("from_", "")
-                    parsed = parse_sharing_key(key_no_prefix)
-                    src_l, src_k = parsed["level"], parsed["node_idx"]
-                    
-                    r_src = self.forest_vars[dst_target_idx][src_l][src_k]['ratio_vars'][t]
-                    p_src = self.problem.p_values[dst_target_idx][(src_l, src_k)]
-                    f_src = self.problem.targets_config[dst_target_idx]['factors'][src_l]
-                    max_w = min(f_src, Config.MAX_SHARING_VOLUME or f_src)
-                    
-                    prod = self.model.NewIntVar(0, p_src * max_w, f"P_intra_{node_name_prefix}_r{t}_{key}")
-                    self.model.AddMultiplicationEquality(prod, [r_src, w_var])
-                    rhs_terms.append(prod * (p_dst // p_src))
 
-                # 3. Inter Sharing (Peerロジックを除外)
-                for key, w_var in node_vars.get('inter_sharing_vars', {}).items():
-                    key_no_prefix = key.replace("from_", "")
-                    parsed = parse_sharing_key(key_no_prefix)
-                    
-                    # Peer Checkを除外し、常にTree間共有として処理
-                    src_m, src_l, src_k = parsed["target_idx"], parsed["level"], parsed["node_idx"]
-                    
-                    r_src = self.forest_vars[src_m][src_l][src_k]['ratio_vars'][t]
-                    p_src = self.problem.p_values[src_m][(src_l, src_k)]
-                    f_src = self.problem.targets_config[src_m]['factors'][src_l]
-                    max_w = min(f_src, Config.MAX_SHARING_VOLUME or f_src)
-                    
-                    prod = self.model.NewIntVar(0, p_src * max_w, f"P_inter_{node_name_prefix}_r{t}_{key}")
-                    self.model.AddMultiplicationEquality(prod, [r_src, w_var])
-                    rhs_terms.append(prod * (p_dst // p_src))
+                # (1) 直接投入試薬 (Pure Reagent)
+                # 純粋試薬は「濃度1 (100%)」とみなす => P=1 相当
+                # したがって、スケールは LCM / 1 = LCM
+                if t < len(node_vars['reagent_vars']):
+                    vol_var = node_vars['reagent_vars'][t]
+                    rhs_terms.append(vol_var * common_multiple)
 
-                self.model.Add(lhs == sum(rhs_terms))
+                # (2) 共有入力 (Intra + Inter)
+                for src in input_sources:
+                    scale = common_multiple // src["p_src"]
+                    r_src_var = src["ratio_vars"][t]
+                    w_var = src["w_var"]
+                    
+                    # 積: prod = w_var * r_src_var
+                    # 変数の上限を見積もる (Volume_Max * P_Max)
+                    prod_max = src["limit_vol"] * src["p_src"]
+                    
+                    prod = self.model.NewIntVar(0, prod_max, f"Prod_{node_name_prefix}_{src['key']}_r{t}")
+                    self.model.AddMultiplicationEquality(prod, [w_var, r_src_var])
+                    
+                    # スケール倍して加算
+                    rhs_terms.append(prod * scale)
+
+                # 等式の登録
+                self.model.Add(lhs_term == sum(rhs_terms))
 
     def _set_ratio_sum_constraints(self):
         """比率変数の総和制約"""
@@ -334,16 +378,6 @@ class OrToolsSolver:
             total_used = sum(total_used_vars)
             self.model.Add(total_used >= 1).OnlyEnforceIf(is_active)
             self.model.Add(total_used == 0).OnlyEnforceIf(is_active.Not())
-
-    def _set_symmetry_breaking_constraints(self):
-        """対称性排除"""
-        for tree_vars in self.forest_vars:
-            for nodes_vars_list in tree_vars.values():
-                if len(nodes_vars_list) > 1:
-                    for k in range(len(nodes_vars_list) - 1):
-                        node_k = nodes_vars_list[k]
-                        node_k1 = nodes_vars_list[k+1]
-                        self.model.Add(node_k["is_active_var"] >= node_k1["is_active_var"])
 
     def _set_objective_function(self):
         """目的関数の設定"""
@@ -387,27 +421,3 @@ class OrToolsSolver:
 
         else:
             raise ValueError(f"Unknown optimization mode: '{self.objective_mode}'")
-
-    def _set_search_strategy(self):
-        """探索戦略"""
-        all_active_vars = []
-        all_sharing_vars = []
-
-        for _, _, _, node_vars in self._iterate_all_nodes():
-            all_active_vars.append(node_vars["is_active_var"])
-            all_sharing_vars.extend(node_vars.get("intra_sharing_vars", {}).values())
-            all_sharing_vars.extend(node_vars.get("inter_sharing_vars", {}).values())
-        
-        if all_active_vars:
-            self.model.AddDecisionStrategy(
-                all_active_vars,
-                cp_model.CHOOSE_FIRST,
-                cp_model.SELECT_MIN_VALUE 
-            )
-        
-        if all_sharing_vars:
-            self.model.AddDecisionStrategy(
-                all_sharing_vars,
-                cp_model.CHOOSE_LOWEST_MIN, 
-                cp_model.SELECT_MIN_VALUE 
-            )
