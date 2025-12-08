@@ -1,5 +1,6 @@
 # utils/config_loader.py
 import config
+import scenarios
 
 class Config:
     """
@@ -24,6 +25,11 @@ class Config:
     MAX_SHARING_VOLUME = config.MAX_SHARING_VOLUME
     MAX_LEVEL_DIFF = config.MAX_LEVEL_DIFF
     MAX_MIXER_SIZE = config.MAX_MIXER_SIZE
+
+    # [NEW] 設定の読み込み
+    ENABLE_ROLE_BASED_PRUNING = config.ENABLE_ROLE_BASED_PRUNING
+
+    INTER_SHARING_MODE = config.INTER_SHARING_MODE
     
     RANDOM_T_REAGENTS = config.RANDOM_T_REAGENTS
     RANDOM_N_TARGETS = config.RANDOM_N_TARGETS
@@ -48,7 +54,7 @@ class Config:
         """
         if Config.MODE in ['auto', 'auto_permutations']:
             # 'auto'系モードの場合は、TARGETS_FOR_AUTO_MODE を使用
-            return config.TARGETS_FOR_AUTO_MODE
+            return scenarios.TARGETS_FOR_AUTO_MODE
         elif Config.MODE == 'manual':
             # 'manual'モードの場合は、TARGETS_FOR_MANUAL_MODE を使用
             return config.TARGETS_FOR_MANUAL_MODE
