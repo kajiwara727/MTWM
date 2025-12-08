@@ -37,18 +37,79 @@ class MTWMProblem:
         all_nodes = [(m, l, k) for m, tree in enumerate(self.forest) for l, nodes in tree.items() for k in range(len(nodes))]
 
         for (m_dst, l_dst, k_dst), (m_src, l_src, k_src) in itertools.product(all_nodes, repeat=2):
+            # 1. 物理的制約チェック
             if l_src <= l_dst: continue
             if Config.MAX_LEVEL_DIFF is not None and l_src > l_dst + Config.MAX_LEVEL_DIFF: continue
 
+            # 2. 濃度整合性チェック
             p_dst = self.p_values[m_dst][(l_dst, k_dst)]
             f_dst = self.targets_config[m_dst]['factors'][l_dst]
             p_src = self.p_values[m_src][(l_src, k_src)]
             
             if (p_dst // f_dst) % p_src != 0: continue
 
+            # 3. 親子関係（Default Edge）の確認
+            # 親子関係にある場合は、設定に関わらず必ず接続を許可する
+            is_default_edge = False
+            if m_src == m_dst:
+                dst_node_data = self.tree_structures[m_dst].get((l_dst, k_dst))
+                if dst_node_data and (l_src, k_src) in dst_node_data['children']:
+                    is_default_edge = True
+
+            # -----------------------------------------------------------------
+            # [NEW] 役割ベースの接続フィルタリング (Role-Based Pruning)
+            # -----------------------------------------------------------------
+            if Config.ENABLE_ROLE_BASED_PRUNING and not is_default_edge:
+                is_allowed = False
+                
+                # --- A. 同じターゲット内 (Intra) ---
+                # ここは従来通り Role (0, 1) で厳しく間引く
+                if m_src == m_dst:
+                    role_id = (k_src + m_src) % 3
+                    
+                    # Role 0: 近距離サポーター
+                    if role_id == 0:
+                        if (l_src - l_dst) == 1: is_allowed = True
+                    # Role 1: 遠距離サポーター
+                    elif role_id == 1:
+                        if (l_src - l_dst) > 1: is_allowed = True
+                    # Role 2 は Intra に貢献しない (Export専用)
+
+                # --- B. 異なるターゲット間 (Inter) ---
+                else:
+                    mode = Config.INTER_SHARING_MODE
+                    
+                    if mode == 'ring':
+                        # 【リングモード】(Role制限なし)
+                        # 次のターゲットであれば、どのノードからでも接続を許可する
+                        # これにより「最後→最初」の接続漏れを防ぐ
+                        num_targets = len(self.targets_config)
+                        if m_dst == (m_src + 1) % num_targets:
+                            is_allowed = True
+                            
+                    elif mode == 'linear':
+                        # 【リニアモード】(Role制限なし)
+                        # 次のターゲットであれば許可
+                        if m_dst == m_src + 1:
+                            is_allowed = True
+                            
+                    else:
+                        # 【Allモード】(Role制限あり)
+                        # 全結合だと多すぎるので、Role 2 (輸出担当) だけに限定する
+                        role_id = (k_src + m_src) % 3
+                        if role_id == 2:
+                            is_allowed = True
+
+                # 許可されなかったエッジはスキップ
+                if not is_allowed:
+                    continue
+            # -----------------------------------------------------------------
+
+            # マップに登録
             key = (m_dst, l_dst, k_dst)
             if key not in source_map: source_map[key] = []
             source_map[key].append((m_src, l_src, k_src))
+            
         return source_map
 
     def _create_sharing_vars_for_node(self, m_dst, l_dst, k_dst):
