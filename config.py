@@ -12,12 +12,20 @@ ENABLE_VISUALIZATION = True
 CONFIG_LOAD_FILE = "random_configs.json"
 
 # --- 制約条件 ---
-MAX_CPU_WORKERS = None
+MAX_CPU_WORKERS = 16
 MAX_TIME_PER_RUN_SECONDS = None
 ABSOLUTE_GAP_LIMIT = 0.99
 MAX_SHARING_VOLUME = None
 MAX_LEVEL_DIFF = None
 MAX_MIXER_SIZE = 5
+
+# [NEW] 役割ベースのプルーニング設定
+ENABLE_ROLE_BASED_PRUNING = True
+
+# [NEW] Inter-Sharing（他ターゲットへの供給）の接続モード
+# 'all' : 全ての他ターゲットへ接続（従来・高コスト）
+# 'ring': 次のターゲット番号へ一方向のみ接続 (0->1->2->0) [推奨・高速]
+INTER_SHARING_MODE = 'ring'
 
 # --- 'random' モード用設定 ---
 RANDOM_N_TARGETS = 3
