@@ -58,13 +58,20 @@ class OrToolsSolver:
         if Config.ABSOLUTE_GAP_LIMIT and Config.ABSOLUTE_GAP_LIMIT > 0:
             self.solver.parameters.absolute_gap_limit = float(Config.ABSOLUTE_GAP_LIMIT)
         
-        self.solver.parameters.linearization_level = 2
-        self.solver.parameters.optimize_with_core =False
+        self.solver.parameters.linearization_level = 0
+        self.solver.parameters.optimize_with_core = False 
+        self.solver.parameters.boolean_encoding_level = 1
         self.solver.parameters.max_num_cuts = 2000 
         self.solver.parameters.cut_level = 2
-        self.solver.parameters.boolean_encoding_level = 2
-        self.solver.parameters.symmetry_level = 2 
         self.solver.parameters.log_search_progress = True
+        
+        # self.solver.parameters.linearization_level = 2
+        # self.solver.parameters.optimize_with_core =False
+        # self.solver.parameters.max_num_cuts = 2000 
+        # self.solver.parameters.cut_level = 2
+        # self.solver.parameters.boolean_encoding_level = 2
+        # self.solver.parameters.symmetry_level = 2 
+        # self.solver.parameters.log_search_progress = True
 
     def solve(self):
         start_time = time.time()
@@ -405,7 +412,7 @@ class OrToolsSolver:
         total_reagents = sum(all_reagent_vars)
 
         if self.objective_mode == "waste":
-            self.model.Add(total_waste >= 1)
+            self.model.Add(total_waste >= 0)
             self.model.Minimize(total_waste)
             self.variable_map["objective_variable"] = total_waste
             return total_waste
